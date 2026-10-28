@@ -123,12 +123,23 @@
   }
   .modal h2 { margin: 0 0 8px; font-size: 16px; }
   .modal p { margin: 0 0 12px; color: var(--muted); }
-  .modal input {
+  #mPin1, #mPin2 {
     width: 100%; font: inherit; font-size: 18px; letter-spacing: 4px; text-align: center;
     padding: 8px; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 8px;
   }
   .modal .err { color: var(--danger); font-size: 12px; min-height: 16px; margin-bottom: 8px; }
   .modal .btns { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+  .modal.wide { width: min(560px, calc(100% - 32px)); max-height: calc(100vh - 48px); display: flex; flex-direction: column; }
+  .lm-add { display: flex; gap: 8px; }
+  .lm-add input, .lm-row input {
+    flex: 1; font: inherit; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; min-width: 0;
+  }
+  .lm-list { overflow-y: auto; margin: 4px -4px 12px; padding: 0 4px; }
+  .lm-group { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; margin: 12px 0 4px; }
+  .lm-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--border); }
+  .lm-row .chip { cursor: default; }
+  .lm-row .n { color: var(--muted); font-size: 12px; margin-left: auto; white-space: nowrap; }
+  .lm-row button { padding: 3px 8px; font-size: 12px; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -138,6 +149,7 @@
   <button id="btnAdd" class="primary">+ Add Issue</button>
   <button id="btnImport">Import Excel</button>
   <button id="btnExport">Export Excel</button>
+  <button id="btnLabels">Manage Labels</button>
   <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" hidden>
   <div class="spacer"></div>
   <span id="lockState" class="lock-state"></span>
@@ -192,16 +204,33 @@
   </div>
 </div>
 
+<div id="labelsBack" class="modal-back" hidden>
+  <div class="modal wide">
+    <h2>Manage Labels</h2>
+    <p>Add labels before using them, rename a label everywhere, or delete it from all issues.</p>
+    <div class="lm-add">
+      <input id="lmNew" placeholder="New label, e.g. status:review" autocomplete="off">
+      <button id="lmAdd" class="primary">Add</button>
+    </div>
+    <div id="lmErr" class="err"></div>
+    <div id="lmList" class="lm-list"></div>
+    <div class="btns"><button id="lmClose">Close</button></div>
+  </div>
+</div>
+
 <script src="vendor/xlsx.full.min.js"></script>
 <script>
 (() => {
   const KEY_ISSUES = 'sts.issues';
   const KEY_PIN = 'sts.pinHash';
+  const KEY_LABELS = 'sts.labels';
   const PIN_RE = /^\d{4,8}$/;
   const AUTO_LOCK_MS = 10 * 60 * 1000;
 
   // ---------- state ----------
   let issues = load();
+  // Labels created in "Manage Labels"; they stay available even when no issue uses them.
+  let labelRegistry = loadLabels();
   let unlocked = false;
   let filterText = '';
   let filterLabels = [];
@@ -209,11 +238,26 @@
   const UNASSIGNED = '\u0000unassigned';
   let lockTimer = null;
 
+  function readJson(key) {
+    try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch { return []; }
+  }
   function load() {
-    try {
-      const data = JSON.parse(localStorage.getItem(KEY_ISSUES) || '[]');
-      return Array.isArray(data) ? data.map(normalize) : [];
-    } catch { return []; }
+    const data = readJson(KEY_ISSUES);
+    return Array.isArray(data) ? data.map(normalize) : [];
+  }
+  function loadLabels() {
+    const data = readJson(KEY_LABELS);
+    return Array.isArray(data) ? uniq(data.map(cleanLabel)) : [];
+  }
+  function saveLabels() {
+    localStorage.setItem(KEY_LABELS, JSON.stringify(labelRegistry));
+  }
+  const sameLabel = (a, b) => a.toLowerCase() === b.toLowerCase();
+  function allLabels() {
+    return uniq([...labelRegistry, ...issues.flatMap(i => i.labels)]).sort((a, b) => a.localeCompare(b));
+  }
+  function labelUsage(label) {
+    return issues.filter(it => it.labels.some(l => sameLabel(l, label))).length;
   }
   function save() {
     localStorage.setItem(KEY_ISSUES, JSON.stringify(issues));
@@ -242,7 +286,7 @@
     const { key, value } = parseLabel(s);
     return key ? `${key.trim()}:${value.trim()}` : s;
   }
-  const labelKey = l => parseLabel(l).key.toLowerCase();
+  function labelKey(l) { return parseLabel(l).key.toLowerCase(); }
   // Adds labels, replacing any existing label of the same type (one value per type).
   function addLabels(current, add) {
     let out = [...current];
@@ -284,6 +328,7 @@
     unlocked = v;
     clearTimeout(lockTimer);
     if (v) lockTimer = setTimeout(() => setUnlocked(false), AUTO_LOCK_MS);
+    else $('labelsBack').hidden = true;
     render();
   }
   function touch() {
@@ -659,7 +704,7 @@
   }
 
   function refreshLists() {
-    const labels = uniq(issues.flatMap(i => i.labels)).sort((a, b) => a.localeCompare(b));
+    const labels = allLabels();
     const people = uniq(issues.map(i => i.assignee)).sort((a, b) => a.localeCompare(b));
     fillList($('labelList'), labels);
     fillList($('assigneeList'), people);
@@ -683,6 +728,9 @@
     ws['!cols'] = [{ wch: 6 }, { wch: 30 }, { wch: 50 }, { wch: 30 }, { wch: 18 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Issues');
+    const wsLabels = XLSX.utils.aoa_to_sheet([['Label', 'Issues'], ...allLabels().map(l => [l, labelUsage(l)])]);
+    wsLabels['!cols'] = [{ wch: 30 }, { wch: 8 }];
+    XLSX.utils.book_append_sheet(wb, wsLabels, 'Labels');
     const d = new Date();
     const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     XLSX.writeFile(wb, `tracker-${stamp}.xlsx`);
@@ -701,7 +749,13 @@
       const wb = XLSX.read(buf);
       const ws = wb.Sheets[wb.SheetNames[0]];
       const raw = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
-      return raw.map(row => {
+      // Optional "Labels" sheet (written by Export) keeps labels that no issue uses.
+      const lws = wb.SheetNames.find(n => n.toLowerCase() === 'labels' && n !== wb.SheetNames[0]);
+      const labels = lws
+        ? XLSX.utils.sheet_to_json(wb.Sheets[lws], { header: 1, defval: '', raw: false })
+            .slice(1).map(r => cleanLabel(r[0])).filter(Boolean)
+        : [];
+      const rows = raw.map(row => {
         const out = {};
         for (const [key, val] of Object.entries(row)) {
           const k = key.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -711,13 +765,14 @@
         }
         return out;
       }).filter(r => String(r.name ?? '').trim() || String(r.description ?? '').trim());
+      return { rows, labels };
     });
   }
 
   async function importExcel(file) {
-    let rows;
+    let rows, labels;
     try {
-      rows = await parseSheet(file);
+      ({ rows, labels } = await parseSheet(file));
     } catch (e) {
       alert('Could not read the file: ' + e.message);
       return;
@@ -730,13 +785,15 @@
       title: 'Import Excel',
       text: `Found ${rows.length} issue(s) in "${file.name}". Replace the current data or append to it?`,
       choices: [
-        { label: 'Append', run: () => applyImport(rows, false) },
-        { label: 'Replace all', cls: 'primary', run: () => applyImport(rows, true) },
+        { label: 'Append', run: () => applyImport(rows, labels, false) },
+        { label: 'Replace all', cls: 'primary', run: () => applyImport(rows, labels, true) },
       ],
     });
   }
 
-  function applyImport(rows, replace) {
+  function applyImport(rows, labels, replace) {
+    labelRegistry = uniq(replace ? labels : [...labelRegistry, ...labels]);
+    saveLabels();
     const imported = rows.map(r => normalize({ ...r, id: 0 }));
     if (replace) {
       // Keep the file's IDs when they are valid and unique; otherwise renumber.
@@ -754,7 +811,127 @@
     render();
   }
 
+  // ---------- manage labels ----------
+  function openLabelManager() {
+    $('lmNew').value = '';
+    $('lmErr').textContent = '';
+    renderLabelManager();
+    $('labelsBack').hidden = false;
+    $('lmNew').focus();
+  }
+
+  function renderLabelManager() {
+    const list = $('lmList');
+    list.innerHTML = '';
+    const labels = allLabels();
+    if (!labels.length) {
+      list.innerHTML = '<div class="empty">No labels yet.</div>';
+      return;
+    }
+    const groups = new Map();
+    for (const l of labels) {
+      const g = parseLabel(l).key;
+      const k = g.toLowerCase();
+      if (!groups.has(k)) groups.set(k, { name: g || 'Other labels', items: [] });
+      groups.get(k).items.push(l);
+    }
+    const keys = [...groups.keys()].sort((a, b) => (a === '') - (b === '') || a.localeCompare(b));
+    for (const k of keys) {
+      const head = document.createElement('div');
+      head.className = 'lm-group';
+      head.textContent = groups.get(k).name;
+      list.append(head);
+      for (const l of groups.get(k).items) list.append(labelRow(l));
+    }
+  }
+
+  function labelRow(label) {
+    const row = document.createElement('div');
+    row.className = 'lm-row';
+    const n = labelUsage(label);
+    const count = document.createElement('span');
+    count.className = 'n';
+    count.textContent = `${n} issue${n === 1 ? '' : 's'}`;
+    row.append(
+      makeChip(label),
+      count,
+      button('Rename', '', () => startRename(row, label)),
+      button('Delete', 'danger', () => deleteLabel(label)),
+    );
+    return row;
+  }
+
+  function startRename(row, label) {
+    const input = document.createElement('input');
+    input.value = label;
+    const done = () => renderLabelManager();
+    const ok = () => {
+      const err = renameLabel(label, input.value);
+      if (err) { $('lmErr').textContent = err; input.focus(); }
+    };
+    input.onkeydown = e => {
+      if (e.key === 'Enter') ok();
+      if (e.key === 'Escape') { e.stopPropagation(); done(); }
+    };
+    row.innerHTML = '';
+    row.append(input, button('Save', 'primary', ok), button('Cancel', '', done));
+    input.focus();
+    input.select();
+  }
+
+  function labelsChanged() {
+    save();
+    saveLabels();
+    touch();
+    render();
+    renderLabelManager();
+  }
+
+  function addRegistryLabel() {
+    const label = cleanLabel($('lmNew').value);
+    $('lmErr').textContent = '';
+    if (!label) return;
+    if (/[,;]/.test(label)) { $('lmErr').textContent = 'A label cannot contain "," or ";"'; return; }
+    if (allLabels().some(l => sameLabel(l, label))) { $('lmErr').textContent = `"${label}" already exists`; return; }
+    labelRegistry = uniq([...labelRegistry, label]);
+    $('lmNew').value = '';
+    labelsChanged();
+  }
+
+  // Renames a label on every issue; renaming onto an existing label merges them.
+  function renameLabel(from, to) {
+    to = cleanLabel(to);
+    $('lmErr').textContent = '';
+    if (!to) return 'Label cannot be empty';
+    if (/[,;]/.test(to)) return 'A label cannot contain "," or ";"';
+    if (to === from) { renderLabelManager(); return; }
+    for (const it of issues) {
+      if (!it.labels.some(l => sameLabel(l, from))) continue;
+      it.labels = addLabels(it.labels.filter(l => !sameLabel(l, from)), [to]);
+    }
+    const wasRegistered = labelRegistry.some(l => sameLabel(l, from));
+    labelRegistry = labelRegistry.filter(l => !sameLabel(l, from));
+    if (wasRegistered) labelRegistry = uniq([...labelRegistry, to]);
+    filterLabels = uniq(filterLabels.map(l => sameLabel(l, from) ? to : l));
+    labelsChanged();
+  }
+
+  function deleteLabel(label) {
+    const n = labelUsage(label);
+    if (n && !confirm(`Remove label "${label}" from ${n} issue(s)?`)) return;
+    for (const it of issues) it.labels = it.labels.filter(l => !sameLabel(l, label));
+    labelRegistry = labelRegistry.filter(l => !sameLabel(l, label));
+    filterLabels = filterLabels.filter(l => !sameLabel(l, label));
+    labelsChanged();
+  }
+
   // ---------- wiring ----------
+  $('btnLabels').onclick = () => requireUnlock(openLabelManager);
+  $('lmAdd').onclick = addRegistryLabel;
+  $('lmNew').onkeydown = e => { if (e.key === 'Enter') addRegistryLabel(); };
+  $('lmClose').onclick = () => { $('labelsBack').hidden = true; };
+  $('labelsBack').onclick = e => { if (e.target === $('labelsBack')) $('labelsBack').hidden = true; };
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') $('labelsBack').hidden = true; });
   $('btnAdd').onclick = () => requireUnlock(() => {
     issues.push({ id: nextId(), name: '', description: '', labels: [], assignee: '' });
     save();

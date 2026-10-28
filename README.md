@@ -14,8 +14,12 @@ Buka `index.html` di browser (folder `vendor/` harus ikut).
   Label dengan tipe yang sama = salah satu cocok (OR), tipe berbeda = semua harus cocok (AND).
   Contoh: `status:open` + `status:in-progress` + `feature` → issue *feature* yang open **atau** in-progress.
   Bisa juga filter per assignee (termasuk *Unassigned*) dan cari teks bebas.
+- **Manage Labels** (perlu PIN): lihat semua label per tipe dan jumlah issue-nya, lalu
+  - **Add**: buat label baru tanpa harus dipasang ke issue (langsung muncul di saran);
+  - **Rename**: ganti nama di semua issue sekaligus, misalnya `status:done` → `status:closed`. Kalau nama barunya sudah ada, kedua label digabung;
+  - **Delete**: hapus label dari semua issue.
 - **Assignee**: ketik nama; nama yang sudah pernah dipakai muncul sebagai saran.
-- **Export Excel**: download `.xlsx` (kolom: ID, Issue Name, Description, Labels, Assignee; label dipisah koma).
+- **Export Excel**: download `.xlsx` (kolom: ID, Issue Name, Description, Labels, Assignee; label dipisah koma), plus sheet `Labels` berisi daftar semua label supaya label yang belum dipakai ikut tersimpan.
 - **Import Excel**: baca sheet pertama dari `.xlsx`/`.xls`/`.csv` dengan header yang sama, lalu pilih *Append* atau *Replace all*.
 
 ## PIN
