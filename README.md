@@ -18,12 +18,14 @@ Buka `index.html` di browser (folder `vendor/` harus ikut).
   **B** (bold), **I** (italic), **A** (warna teks), **Fill** (warna background sel), atau **Clear** (hapus format).
   Tanpa blok teks, format berlaku untuk seluruh sel. Ctrl+B / Ctrl+I juga bisa saat mengetik.
   Bold/italic/warna teks berlaku untuk Issue Name dan Description; warna background untuk semua kolom.
+- **Approved By**: pilih *Capt Mohamed* atau *Capt Abdullah*; sel menampilkan "✔ Approved by Capt …" (atau *Not approved*).
+  Bisa difilter (Not approved / Approved / per kapten). Daftar approver ada di konstanta `APPROVERS` di `index.html`.
 - **Manage Labels** (perlu PIN): lihat semua label per tipe dan jumlah issue-nya, lalu
   - **Add**: buat label baru tanpa harus dipasang ke issue (langsung muncul di saran);
   - **Rename**: ganti nama di semua issue sekaligus, misalnya `status:done` → `status:closed`. Kalau nama barunya sudah ada, kedua label digabung;
   - **Delete**: hapus label dari semua issue.
 - **Assignee**: ketik nama; nama yang sudah pernah dipakai muncul sebagai saran.
-- **Export Excel**: download `.xlsx` (kolom: ID, Issue Name, Description, Labels, Assignee; label dipisah koma), termasuk format bold/italic/warna teks dan warna background sel, plus sheet `Labels` berisi daftar semua label supaya label yang belum dipakai ikut tersimpan.
+- **Export Excel**: download `.xlsx` (kolom: ID, Issue Name, Description, Labels, Assignee, Approved By; label dipisah koma), termasuk format bold/italic/warna teks dan warna background sel, plus sheet `Labels` berisi daftar semua label supaya label yang belum dipakai ikut tersimpan.
 - **Import Excel**: baca sheet pertama dari `.xlsx`/`.xls`/`.csv` dengan header yang sama, lalu pilih *Append* atau *Replace all*.
 
 ## PIN
