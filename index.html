@@ -69,7 +69,7 @@
   td { padding: 0; }
   td.id { padding: 8px; color: var(--muted); width: 48px; text-align: right; }
   td.act { width: 44px; text-align: center; padding: 4px; }
-  td input.cell, td textarea.cell {
+  td input.cell {
     width: 100%;
     border: 0;
     background: transparent;
@@ -79,9 +79,25 @@
     resize: none;
     outline: none;
   }
-  td textarea.cell { min-height: 36px; overflow: hidden; }
-  td input.cell:focus, td textarea.cell:focus { background: #fff; box-shadow: inset 0 0 0 2px var(--accent); }
-  td input.cell:disabled, td textarea.cell:disabled { color: inherit; cursor: default; }
+  td input.cell:focus { box-shadow: inset 0 0 0 2px var(--accent); }
+  td input.cell:disabled { color: inherit; cursor: default; }
+  td .rich { padding: 8px; min-height: 36px; outline: none; white-space: pre-wrap; overflow-wrap: anywhere; }
+  td .rich:focus { box-shadow: inset 0 0 0 2px var(--accent); }
+  td .rich:empty::before { content: attr(data-placeholder); color: #9aa5b1; }
+  td.active-cell { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  .fmt-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 12px; }
+  .fmt-bar .fmt-title { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; }
+  .fmt-bar button { min-width: 34px; padding: 5px 10px; }
+  .fmt-bar button.on { background: #e8efff; border-color: var(--accent); }
+  .fmt-bar .split { display: inline-flex; align-items: stretch; }
+  .fmt-bar .split button { border-radius: 6px 0 0 6px; display: inline-flex; flex-direction: column; align-items: center; line-height: 1.1; }
+  .fmt-bar .split .bar { display: block; width: 18px; height: 4px; margin-top: 2px; border-radius: 1px; }
+  .fmt-bar input[type=color] {
+    width: 26px; padding: 0 2px; border: 1px solid var(--border); border-left: 0; border-radius: 0 6px 6px 0;
+    background: var(--panel); cursor: pointer;
+  }
+  .fmt-bar .fmt-hint { color: var(--muted); font-size: 12px; }
 
   .labels { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 8px; min-height: 36px; align-items: center; }
   .chip {
@@ -166,6 +182,21 @@
     <button id="btnClear" hidden>Clear filters</button>
     <span id="count" class="count"></span>
   </div>
+  <div id="fmtBar" class="fmt-bar" hidden>
+    <span class="fmt-title">Format</span>
+    <button id="fmtBold" title="Bold (Ctrl+B)"><b>B</b></button>
+    <button id="fmtItalic" title="Italic (Ctrl+I)"><i>I</i></button>
+    <span class="split">
+      <button id="fmtColor" title="Text color"><span>A</span><span id="fmtColorBar" class="bar"></span></button>
+      <input type="color" id="fmtColorPick" value="#dc2626" title="Choose text color">
+    </span>
+    <span class="split">
+      <button id="fmtFill" title="Cell background color"><span>Fill</span><span id="fmtFillBar" class="bar"></span></button>
+      <input type="color" id="fmtFillPick" value="#fde68a" title="Choose cell background color">
+    </span>
+    <button id="fmtClear" title="Remove formatting (selected text, or the whole cell)">Clear</button>
+    <span id="fmtHint" class="fmt-hint"></span>
+  </div>
   <div class="grid-wrap">
     <table>
       <thead>
@@ -186,6 +217,8 @@
     Labels: type and press <b>Enter</b> or <b>,</b> to add, or pick an existing one. Use <b>type:value</b> (e.g. <code>status:open</code>)
     for typed labels: an issue holds one value per type, so adding <code>status:closed</code> replaces <code>status:open</code>.
     Click a label to filter by it. Label filters of the same type match any of them; different types must all match.<br>
+    Format: click a cell (or select part of its text) and use <b>B</b>, <i>I</i>, <b>A</b> (text color) or <b>Fill</b> (cell color);
+    Ctrl+B / Ctrl+I also work while typing.<br>
     Data is saved in this browser automatically. Editing requires the PIN.
   </div>
 </main>
@@ -219,11 +252,14 @@
 </div>
 
 <script src="vendor/xlsx.full.min.js"></script>
+<script src="vendor/exceljs.min.js"></script>
 <script>
 (() => {
   const KEY_ISSUES = 'sts.issues';
   const KEY_PIN = 'sts.pinHash';
   const KEY_LABELS = 'sts.labels';
+  const HEX_RE = /^#[0-9a-f]{6}$/i;
+  const BG_FIELDS = ['name', 'description', 'labels', 'assignee'];
   const PIN_RE = /^\d{4,8}$/;
   const AUTO_LOCK_MS = 10 * 60 * 1000;
 
@@ -232,6 +268,8 @@
   // Labels created in "Manage Labels"; they stay available even when no issue uses them.
   let labelRegistry = loadLabels();
   let unlocked = false;
+  let activeCell = null;   // { id, field } of the cell the format toolbar applies to
+  let savedRange = null;   // last text selection inside that cell
   let filterText = '';
   let filterLabels = [];
   let filterAssignee = '';
@@ -266,12 +304,39 @@
   function normalize(it) {
     return {
       id: Number(it.id) || 0,
-      name: String(it.name ?? ''),
-      description: String(it.description ?? ''),
+      name: toRuns(it.name),
+      description: toRuns(it.description),
+      bg: cleanBg(it.bg),
       labels: addLabels([], (Array.isArray(it.labels) ? it.labels : splitLabels(it.labels)).map(cleanLabel)),
       assignee: String(it.assignee ?? ''),
     };
   }
+  // Rich text is stored as runs: [{ t: 'text', b: 1, i: 1, c: '#rrggbb' }].
+  function toRuns(v) {
+    const raw = Array.isArray(v) ? v : (v == null || v === '' ? [] : [{ t: String(v) }]);
+    const runs = [];
+    for (const r of raw) {
+      const run = { t: String(r?.t ?? '') };
+      if (r?.b) run.b = 1;
+      if (r?.i) run.i = 1;
+      if (HEX_RE.test(r?.c ?? '')) run.c = r.c.toLowerCase();
+      pushRun(runs, run);
+    }
+    return runs;
+  }
+  function pushRun(runs, run) {
+    if (!run.t) return;
+    const last = runs[runs.length - 1];
+    if (last && !!last.b === !!run.b && !!last.i === !!run.i && last.c === run.c) last.t += run.t;
+    else runs.push(run);
+  }
+  function text(runs) { return runs.map(r => r.t).join(''); }
+  function cleanBg(bg) {
+    const out = {};
+    for (const f of BG_FIELDS) if (HEX_RE.test(bg?.[f] ?? '')) out[f] = bg[f].toLowerCase();
+    return out;
+  }
+
   function splitLabels(v) {
     return String(v ?? '').split(/[,;]/).map(cleanLabel).filter(Boolean);
   }
@@ -505,7 +570,7 @@
     }
     if (!filterText) return true;
     const q = filterText.toLowerCase();
-    return [it.name, it.description, it.assignee, ...it.labels, String(it.id)]
+    return [text(it.name), text(it.description), it.assignee, ...it.labels, String(it.id)]
       .some(v => v.toLowerCase().includes(q));
   }
 
@@ -569,6 +634,8 @@
     $('lockState').className = 'lock-state' + (unlocked ? ' unlocked' : '');
     $('btnLock').textContent = unlocked ? 'Lock' : (hasPin() ? 'Unlock (PIN)' : 'Set PIN to edit');
     $('btnChangePin').hidden = !unlocked;
+    $('fmtBar').hidden = !unlocked;
+    updateFormatBar();
 
     const tbody = $('rows');
     tbody.innerHTML = '';
@@ -589,27 +656,9 @@
     tdId.className = 'id';
     tdId.textContent = it.id;
 
-    const name = document.createElement('textarea');
-    name.className = 'cell';
-    name.rows = 1;
-    name.value = it.name;
-    name.placeholder = unlocked ? 'Issue name' : '';
-    name.disabled = !unlocked;
     // Issue name is a single line of text that wraps visually; Enter does not add a newline.
-    name.onkeydown = e => { if (e.key === 'Enter') e.preventDefault(); };
-    name.oninput = () => {
-      if (name.value.includes('\n')) name.value = name.value.replace(/\s*\n\s*/g, ' ');
-      it.name = name.value; autosize(name); save(); touch();
-    };
-
-    const desc = document.createElement('textarea');
-    desc.className = 'cell';
-    desc.rows = 1;
-    desc.value = it.description;
-    desc.placeholder = unlocked ? 'Description' : '';
-    desc.disabled = !unlocked;
-    desc.oninput = () => { it.description = desc.value; autosize(desc); save(); touch(); };
-    requestAnimationFrame(() => { autosize(name); autosize(desc); });
+    const name = richCell(it, 'name', 'Issue name', true);
+    const desc = richCell(it, 'description', 'Description', false);
 
     const assignee = document.createElement('input');
     assignee.className = 'cell';
@@ -623,7 +672,7 @@
     act.className = 'act';
     if (unlocked) {
       const del = button('🗑', 'danger', () => {
-        if (!confirm(`Delete issue #${it.id} "${it.name}"?`)) return;
+        if (!confirm(`Delete issue #${it.id} "${text(it.name)}"?`)) return;
         issues = issues.filter(x => x !== it);
         save();
         render();
@@ -632,19 +681,97 @@
       act.append(del);
     }
 
-    tr.append(tdId, wrap(name), wrap(desc), renderLabels(it), wrap(assignee), act);
+    tr.append(tdId, wrap(name, it, 'name'), wrap(desc, it, 'description'), renderLabels(it), wrap(assignee, it, 'assignee'), act);
     return tr;
   }
 
-  function wrap(el) {
+  function wrap(el, it, field) {
     const td = document.createElement('td');
     td.append(el);
+    styleCell(td, it, field);
     return td;
   }
 
-  function autosize(t) {
-    t.style.height = 'auto';
-    t.style.height = t.scrollHeight + 'px';
+  function styleCell(td, it, field) {
+    td.dataset.field = field;
+    td.style.background = it.bg[field] || '';
+    if (activeCell && activeCell.id === it.id && activeCell.field === field) td.classList.add('active-cell');
+  }
+
+  function renderRuns(el, runs) {
+    el.textContent = '';
+    for (const r of runs) {
+      if (!r.b && !r.i && !r.c) { el.append(r.t); continue; }
+      const span = document.createElement('span');
+      if (r.b) span.style.fontWeight = 'bold';
+      if (r.i) span.style.fontStyle = 'italic';
+      if (r.c) span.style.color = r.c;
+      span.textContent = r.t;
+      el.append(span);
+    }
+  }
+
+  const colorCtx = document.createElement('canvas').getContext('2d');
+  function toHex(color) {
+    colorCtx.fillStyle = '#000000';
+    colorCtx.fillStyle = color;
+    return HEX_RE.test(colorCtx.fillStyle) ? colorCtx.fillStyle : '';
+  }
+
+  // Reads the edited DOM (spans, <b>, <i>, <font color>, line breaks) back into runs.
+  function domToRuns(root) {
+    const runs = [];
+    const walk = (node, st) => {
+      for (const n of node.childNodes) {
+        if (n.nodeType === Node.TEXT_NODE) { pushRun(runs, { ...st, t: n.nodeValue.replace(/\u00a0/g, ' ') }); continue; }
+        if (n.nodeType !== Node.ELEMENT_NODE) continue;
+        const tag = n.tagName;
+        if (tag === 'BR') { pushRun(runs, { ...st, t: '\n' }); continue; }
+        const s = { ...st };
+        if (tag === 'B' || tag === 'STRONG') s.b = 1;
+        if (tag === 'I' || tag === 'EM') s.i = 1;
+        const fw = n.style.fontWeight;
+        if (fw === 'bold' || Number(fw) >= 600) s.b = 1; else if (fw === 'normal' || Number(fw) && Number(fw) < 600) delete s.b;
+        if (n.style.fontStyle === 'italic') s.i = 1; else if (n.style.fontStyle === 'normal') delete s.i;
+        const c = n.style.color || (tag === 'FONT' && n.getAttribute('color'));
+        if (c) { const hex = toHex(c); if (hex) s.c = hex; }
+        if ((tag === 'DIV' || tag === 'P') && runs.length && !text(runs).endsWith('\n')) pushRun(runs, { ...st, t: '\n' });
+        walk(n, s);
+      }
+    };
+    walk(root, {});
+    // Drop trailing line breaks left behind by the editor.
+    while (runs.length && /\n$/.test(runs[runs.length - 1].t)) {
+      const last = runs[runs.length - 1];
+      last.t = last.t.replace(/\n+$/, '');
+      if (!last.t) runs.pop();
+    }
+    return toRuns(runs.map(r => (r.c === '#000000' ? { ...r, c: undefined } : r)));
+  }
+
+  function richCell(it, field, placeholder, singleLine) {
+    const el = document.createElement('div');
+    el.className = 'rich';
+    renderRuns(el, it[field]);
+    if (!unlocked) return el;
+    el.contentEditable = 'true';
+    el.dataset.placeholder = placeholder;
+    el.oninput = () => {
+      it[field] = domToRuns(el);
+      if (!el.textContent) el.textContent = ''; // let the :empty placeholder show again
+      save();
+      touch();
+    };
+    el.onkeydown = e => { if (singleLine && e.key === 'Enter') e.preventDefault(); };
+    // Paste as plain text so formatting from other apps does not leak in.
+    el.onpaste = e => {
+      e.preventDefault();
+      let t = e.clipboardData.getData('text/plain');
+      if (singleLine) t = t.replace(/\s*\n\s*/g, ' ');
+      document.execCommand('insertText', false, t);
+    };
+    el.ondrop = e => e.preventDefault();
+    return el;
   }
 
   function renderLabels(it) {
@@ -652,6 +779,7 @@
     const box = document.createElement('div');
     box.className = 'labels';
     td.append(box);
+    styleCell(td, it, 'labels');
 
     const redraw = (focus) => {
       if (!td.isConnected) return;
@@ -722,18 +850,48 @@
   // ---------- Excel ----------
   const HEADERS = ['ID', 'Issue Name', 'Description', 'Labels', 'Assignee'];
 
-  function exportExcel() {
-    const rows = issues.map(i => [i.id, i.name, i.description, i.labels.join(', '), i.assignee]);
-    const ws = XLSX.utils.aoa_to_sheet([HEADERS, ...rows]);
-    ws['!cols'] = [{ wch: 6 }, { wch: 30 }, { wch: 50 }, { wch: 30 }, { wch: 18 }];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Issues');
-    const wsLabels = XLSX.utils.aoa_to_sheet([['Label', 'Issues'], ...allLabels().map(l => [l, labelUsage(l)])]);
-    wsLabels['!cols'] = [{ wch: 30 }, { wch: 8 }];
-    XLSX.utils.book_append_sheet(wb, wsLabels, 'Labels');
+  // Column number (1-based) of each formattable field in the exported sheet.
+  const FIELD_COLUMNS = { name: 2, description: 3, labels: 4, assignee: 5 };
+  const toArgb = hex => 'FF' + hex.slice(1).toUpperCase();
+  const fromArgb = argb => (/^[0-9a-f]{8}$/i.test(argb ?? '') ? '#' + argb.slice(2).toLowerCase() : '');
+
+  function runsToExcel(runs) {
+    if (!runs.some(r => r.b || r.i || r.c)) return text(runs);
+    return {
+      richText: runs.map(r => ({
+        text: r.t,
+        font: { name: 'Calibri', size: 11, bold: !!r.b, italic: !!r.i, ...(r.c && { color: { argb: toArgb(r.c) } }) },
+      })),
+    };
+  }
+
+  async function exportExcel() {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Issues');
+    ws.columns = [{ width: 6 }, { width: 30 }, { width: 50 }, { width: 30 }, { width: 18 }];
+    ws.addRow(HEADERS).font = { bold: true };
+    for (const it of issues) {
+      const row = ws.addRow([it.id, runsToExcel(it.name), runsToExcel(it.description), it.labels.join(', '), it.assignee]);
+      row.alignment = { vertical: 'top', wrapText: true };
+      for (const [field, col] of Object.entries(FIELD_COLUMNS)) {
+        const bg = it.bg[field];
+        if (bg) row.getCell(col).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: toArgb(bg) } };
+      }
+    }
+    const wsLabels = wb.addWorksheet('Labels');
+    wsLabels.columns = [{ width: 30 }, { width: 8 }];
+    wsLabels.addRow(['Label', 'Issues']).font = { bold: true };
+    for (const l of allLabels()) wsLabels.addRow([l, labelUsage(l)]);
+
+    const blob = new Blob([await wb.xlsx.writeBuffer()],
+      { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const d = new Date();
     const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    XLSX.writeFile(wb, `tracker-${stamp}.xlsx`);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `tracker-${stamp}.xlsx`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
 
   const COLUMN_ALIASES = {
@@ -744,7 +902,66 @@
     assignee: ['assignee', 'assignedto', 'assigned', 'owner', 'pic'],
   };
 
+  function fieldFor(header) {
+    const k = String(header ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    return Object.keys(COLUMN_ALIASES).find(f => COLUMN_ALIASES[f].includes(k));
+  }
+  const hasIssueText = r => text(toRuns(r.name)).trim() || text(toRuns(r.description)).trim();
+
   function parseSheet(file) {
+    return /\.xlsx$/i.test(file.name) ? parseXlsx(file) : parsePlainSheet(file);
+  }
+
+  // .xlsx keeps formatting: rich text / cell fonts become runs, solid fills become cell colors.
+  async function parseXlsx(file) {
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await file.arrayBuffer());
+    const ws = wb.worksheets[0];
+    const cols = {};
+    ws.getRow(1).eachCell((cell, col) => {
+      const f = fieldFor(cell.text);
+      if (f && !Object.values(cols).includes(f)) cols[col] = f;
+    });
+    const rows = [];
+    ws.eachRow((row, n) => {
+      if (n === 1) return;
+      const out = { bg: {} };
+      for (const [col, field] of Object.entries(cols)) {
+        const cell = row.getCell(Number(col));
+        out[field] = field === 'name' || field === 'description' ? cellToRuns(cell) : cell.text;
+        const fill = cell.fill;
+        if (fill?.type === 'pattern' && fill.pattern === 'solid') {
+          const bg = fromArgb(fill.fgColor?.argb);
+          if (bg && BG_FIELDS.includes(field)) out.bg[field] = bg;
+        }
+      }
+      if (hasIssueText(out)) rows.push(out);
+    });
+    const lws = wb.worksheets.find((w, i) => i > 0 && w.name.toLowerCase() === 'labels');
+    const labels = [];
+    lws?.eachRow((row, n) => { if (n > 1) labels.push(cleanLabel(row.getCell(1).text)); });
+    return { rows, labels: labels.filter(Boolean) };
+  }
+
+  function fontStyle(font) {
+    const st = {};
+    if (font?.bold) st.b = 1;
+    if (font?.italic) st.i = 1;
+    const c = fromArgb(font?.color?.argb);
+    if (c && c !== '#000000') st.c = c;
+    return st;
+  }
+
+  function cellToRuns(cell) {
+    const base = fontStyle(cell.font);
+    const v = cell.value;
+    if (v && typeof v === 'object' && Array.isArray(v.richText)) {
+      return toRuns(v.richText.map(r => ({ t: r.text, ...(r.font ? fontStyle(r.font) : base) })));
+    }
+    return toRuns([{ t: cell.text, ...base }]);
+  }
+
+  function parsePlainSheet(file) {
     return file.arrayBuffer().then(buf => {
       const wb = XLSX.read(buf);
       const ws = wb.Sheets[wb.SheetNames[0]];
@@ -764,7 +981,7 @@
           }
         }
         return out;
-      }).filter(r => String(r.name ?? '').trim() || String(r.description ?? '').trim());
+      }).filter(hasIssueText);
       return { rows, labels };
     });
   }
@@ -809,6 +1026,85 @@
     save();
     touch();
     render();
+  }
+
+  // ---------- formatting ----------
+  function findActive() {
+    if (!activeCell) return null;
+    const it = issues.find(x => x.id === activeCell.id);
+    const td = document.querySelector(`tr[data-id="${activeCell.id}"] td[data-field="${activeCell.field}"]`);
+    if (!it || !td) return null;
+    return { it, td, field: activeCell.field, ed: td.querySelector('.rich[contenteditable=true]') };
+  }
+
+  function setActiveCell(td) {
+    const id = Number(td.closest('tr')?.dataset.id);
+    const field = td.dataset.field;
+    if (!id || !field) return;
+    if (activeCell?.id !== id || activeCell?.field !== field) savedRange = null;
+    document.querySelectorAll('td.active-cell').forEach(x => x.classList.remove('active-cell'));
+    td.classList.add('active-cell');
+    activeCell = { id, field };
+    updateFormatBar();
+  }
+
+  function updateFormatBar() {
+    const c = unlocked && findActive();
+    const textOk = !!c?.ed;
+    for (const id of ['fmtBold', 'fmtItalic', 'fmtColor', 'fmtColorPick']) $(id).disabled = !textOk;
+    for (const id of ['fmtFill', 'fmtFillPick', 'fmtClear']) $(id).disabled = !c;
+    const inEd = textOk && c.ed.contains(document.getSelection()?.anchorNode);
+    $('fmtBold').classList.toggle('on', inEd && document.queryCommandState('bold'));
+    $('fmtItalic').classList.toggle('on', inEd && document.queryCommandState('italic'));
+    $('fmtColorBar').style.background = $('fmtColorPick').value;
+    $('fmtFillBar').style.background = $('fmtFillPick').value;
+    $('fmtHint').textContent = !c ? 'Click a cell first.'
+      : textOk ? 'Select text to format part of it, or format the whole cell.'
+      : 'Only the cell color applies to this column.';
+  }
+
+  // Applies a text command to the selected text, or to the whole cell when nothing is selected.
+  function applyText(cmd, value) {
+    const c = findActive();
+    if (!c?.ed) return;
+    const sel = document.getSelection();
+    let range = savedRange && c.ed.contains(savedRange.commonAncestorContainer) ? savedRange : null;
+    const whole = !range || range.collapsed;
+    if (whole) {
+      range = document.createRange();
+      range.selectNodeContents(c.ed);
+    }
+    c.ed.focus();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    document.execCommand('styleWithCSS', false, false);
+    document.execCommand(cmd, false, value);
+    if (whole) sel.collapseToEnd();
+    c.it[c.field] = domToRuns(c.ed);
+    save();
+    touch();
+    updateFormatBar();
+  }
+
+  function applyFill(color) {
+    const c = findActive();
+    if (!c) return;
+    if (color) c.it.bg[c.field] = color; else delete c.it.bg[c.field];
+    c.td.style.background = color || '';
+    save();
+    touch();
+  }
+
+  function clearFormat() {
+    const c = findActive();
+    if (!c) return;
+    const range = savedRange && c.ed?.contains(savedRange.commonAncestorContainer) ? savedRange : null;
+    if (range && !range.collapsed) { applyText('removeFormat'); return; }
+    if (c.ed) {
+      c.it[c.field] = [{ t: text(c.it[c.field]) }].filter(r => r.t);
+      renderRuns(c.ed, c.it[c.field]);
+    }
+    applyFill('');
   }
 
   // ---------- manage labels ----------
@@ -927,13 +1223,36 @@
 
   // ---------- wiring ----------
   $('btnLabels').onclick = () => requireUnlock(openLabelManager);
+  $('rows').addEventListener('focusin', e => {
+    const td = e.target.closest('td[data-field]');
+    if (td && unlocked) setActiveCell(td);
+  });
+  document.addEventListener('selectionchange', () => {
+    const c = activeCell && findActive();
+    const sel = document.getSelection();
+    if (c?.ed && sel.rangeCount && c.ed.contains(sel.anchorNode)) {
+      savedRange = sel.getRangeAt(0).cloneRange();
+      updateFormatBar();
+    }
+  });
+  // Keep the cell's focus and selection when clicking toolbar buttons.
+  for (const id of ['fmtBold', 'fmtItalic', 'fmtColor', 'fmtFill', 'fmtClear']) {
+    $(id).addEventListener('mousedown', e => e.preventDefault());
+  }
+  $('fmtBold').onclick = () => applyText('bold');
+  $('fmtItalic').onclick = () => applyText('italic');
+  $('fmtColor').onclick = () => applyText('foreColor', $('fmtColorPick').value);
+  $('fmtColorPick').onchange = () => { updateFormatBar(); applyText('foreColor', $('fmtColorPick').value); };
+  $('fmtFill').onclick = () => applyFill($('fmtFillPick').value);
+  $('fmtFillPick').oninput = () => { updateFormatBar(); applyFill($('fmtFillPick').value); };
+  $('fmtClear').onclick = clearFormat;
   $('lmAdd').onclick = addRegistryLabel;
   $('lmNew').onkeydown = e => { if (e.key === 'Enter') addRegistryLabel(); };
   $('lmClose').onclick = () => { $('labelsBack').hidden = true; };
   $('labelsBack').onclick = e => { if (e.target === $('labelsBack')) $('labelsBack').hidden = true; };
   document.addEventListener('keydown', e => { if (e.key === 'Escape') $('labelsBack').hidden = true; });
   $('btnAdd').onclick = () => requireUnlock(() => {
-    issues.push({ id: nextId(), name: '', description: '', labels: [], assignee: '' });
+    issues.push(normalize({ id: nextId() }));
     save();
     clearFilters();
     render();
@@ -954,7 +1273,6 @@
   $('fLabel').onchange = e => { if (e.target.value) addLabelFilter(e.target.value); };
   $('fAssignee').onchange = e => { filterAssignee = e.target.value; render(); };
   $('btnClear').onclick = () => { clearFilters(); render(); };
-  window.addEventListener('resize', () => document.querySelectorAll('textarea.cell').forEach(autosize));
   mBack.onclick = e => { if (e.target === mBack) closeModal(); };
 
   render();

@@ -14,12 +14,16 @@ Buka `index.html` di browser (folder `vendor/` harus ikut).
   Label dengan tipe yang sama = salah satu cocok (OR), tipe berbeda = semua harus cocok (AND).
   Contoh: `status:open` + `status:in-progress` + `feature` → issue *feature* yang open **atau** in-progress.
   Bisa juga filter per assignee (termasuk *Unassigned*) dan cari teks bebas.
+- **Format** (toolbar muncul saat unlocked): klik sel, atau blok sebagian teksnya, lalu pilih
+  **B** (bold), **I** (italic), **A** (warna teks), **Fill** (warna background sel), atau **Clear** (hapus format).
+  Tanpa blok teks, format berlaku untuk seluruh sel. Ctrl+B / Ctrl+I juga bisa saat mengetik.
+  Bold/italic/warna teks berlaku untuk Issue Name dan Description; warna background untuk semua kolom.
 - **Manage Labels** (perlu PIN): lihat semua label per tipe dan jumlah issue-nya, lalu
   - **Add**: buat label baru tanpa harus dipasang ke issue (langsung muncul di saran);
   - **Rename**: ganti nama di semua issue sekaligus, misalnya `status:done` → `status:closed`. Kalau nama barunya sudah ada, kedua label digabung;
   - **Delete**: hapus label dari semua issue.
 - **Assignee**: ketik nama; nama yang sudah pernah dipakai muncul sebagai saran.
-- **Export Excel**: download `.xlsx` (kolom: ID, Issue Name, Description, Labels, Assignee; label dipisah koma), plus sheet `Labels` berisi daftar semua label supaya label yang belum dipakai ikut tersimpan.
+- **Export Excel**: download `.xlsx` (kolom: ID, Issue Name, Description, Labels, Assignee; label dipisah koma), termasuk format bold/italic/warna teks dan warna background sel, plus sheet `Labels` berisi daftar semua label supaya label yang belum dipakai ikut tersimpan.
 - **Import Excel**: baca sheet pertama dari `.xlsx`/`.xls`/`.csv` dengan header yang sama, lalu pilih *Append* atau *Replace all*.
 
 ## PIN
@@ -32,4 +36,5 @@ Catatan: data dan PIN (dalam bentuk hash) disimpan di `localStorage` browser. PI
 bukan pengamanan sebenarnya — siapa pun yang punya akses ke browser/devtools tetap bisa mengubah datanya.
 Lupa PIN: hapus key `sts.pinHash` di localStorage (data issue tetap aman).
 
-Excel diproses dengan [SheetJS](https://sheetjs.com) 0.20.3 (`vendor/xlsx.full.min.js`).
+Excel `.xlsx` diproses dengan [ExcelJS](https://github.com/exceljs/exceljs) 4.4.0 (`vendor/exceljs.min.js`) supaya format ikut tersimpan;
+`.xls`/`.csv` dibaca dengan [SheetJS](https://sheetjs.com) 0.20.3 (`vendor/xlsx.full.min.js`), tanpa format.
