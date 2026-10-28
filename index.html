@@ -1,0 +1,632 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Simple Tracker Sheet</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --border: #dfe3e8;
+    --text: #1f2933;
+    --muted: #6b7785;
+    --accent: #2563eb;
+    --danger: #dc2626;
+    --row-hover: #f1f5fb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 5;
+  }
+  header h1 { font-size: 16px; margin: 0 12px 0 0; }
+  .spacer { flex: 1; }
+  button {
+    font: inherit;
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel);
+    color: var(--text);
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { color: var(--danger); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  input[type=search] {
+    font: inherit;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    min-width: 200px;
+  }
+  .lock-state { font-size: 12px; color: var(--muted); }
+  .lock-state.unlocked { color: #15803d; font-weight: 600; }
+
+  main { padding: 16px; }
+  .grid-wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
+  table { width: 100%; border-collapse: collapse; min-width: 820px; }
+  th, td { border-bottom: 1px solid var(--border); border-right: 1px solid var(--border); vertical-align: top; text-align: left; }
+  th:last-child, td:last-child { border-right: 0; }
+  th { background: #fafbfc; font-weight: 600; padding: 8px; font-size: 12px; text-transform: uppercase; color: var(--muted); }
+  tbody tr:hover { background: var(--row-hover); }
+  td { padding: 0; }
+  td.id { padding: 8px; color: var(--muted); width: 48px; text-align: right; }
+  td.act { width: 44px; text-align: center; padding: 4px; }
+  td input.cell, td textarea.cell {
+    width: 100%;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    color: inherit;
+    padding: 8px;
+    resize: none;
+    outline: none;
+  }
+  td textarea.cell { min-height: 36px; overflow: hidden; }
+  td input.cell:focus, td textarea.cell:focus { background: #fff; box-shadow: inset 0 0 0 2px var(--accent); }
+  td input.cell:disabled, td textarea.cell:disabled { color: inherit; cursor: default; }
+
+  .labels { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 8px; min-height: 36px; align-items: center; }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    color: #fff;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .chip .x { border: 0; background: none; color: inherit; padding: 0; font-size: 14px; line-height: 1; cursor: pointer; opacity: .8; }
+  .chip .x:hover { opacity: 1; }
+  .labels input { border: 0; outline: none; font: inherit; min-width: 80px; flex: 1; padding: 2px 0; background: transparent; }
+
+  .empty { padding: 32px; text-align: center; color: var(--muted); }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 8px; }
+
+  .modal-back {
+    position: fixed; inset: 0; background: rgba(15, 23, 42, .45);
+    display: flex; align-items: center; justify-content: center; z-index: 20;
+  }
+  .modal {
+    background: var(--panel); border-radius: 10px; padding: 20px; width: min(360px, calc(100% - 32px));
+    box-shadow: 0 10px 30px rgba(0,0,0,.2);
+  }
+  .modal h2 { margin: 0 0 8px; font-size: 16px; }
+  .modal p { margin: 0 0 12px; color: var(--muted); }
+  .modal input {
+    width: 100%; font: inherit; font-size: 18px; letter-spacing: 4px; text-align: center;
+    padding: 8px; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 8px;
+  }
+  .modal .err { color: var(--danger); font-size: 12px; min-height: 16px; margin-bottom: 8px; }
+  .modal .btns { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Simple Tracker Sheet</h1>
+  <button id="btnAdd" class="primary">+ Add Issue</button>
+  <button id="btnImport">Import Excel</button>
+  <button id="btnExport">Export Excel</button>
+  <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" hidden>
+  <input type="search" id="search" placeholder="Search name, label, assignee…">
+  <div class="spacer"></div>
+  <span id="lockState" class="lock-state"></span>
+  <button id="btnChangePin" hidden>Change PIN</button>
+  <button id="btnLock"></button>
+</header>
+
+<main>
+  <div class="grid-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th style="width:22%">Issue Name</th>
+          <th style="width:34%">Description</th>
+          <th style="width:26%">Labels</th>
+          <th style="width:14%">Assignee</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div id="empty" class="empty" hidden></div>
+  </div>
+  <div class="hint">
+    Labels: type and press <b>Enter</b> or <b>,</b> to add; click a label to filter by it.
+    Data is saved in this browser automatically. Editing requires the PIN.
+  </div>
+</main>
+
+<datalist id="labelList"></datalist>
+<datalist id="assigneeList"></datalist>
+
+<div id="modalBack" class="modal-back" hidden>
+  <div class="modal">
+    <h2 id="mTitle"></h2>
+    <p id="mText"></p>
+    <input id="mPin1" type="password" inputmode="numeric" autocomplete="off" maxlength="8">
+    <input id="mPin2" type="password" inputmode="numeric" autocomplete="off" maxlength="8">
+    <div id="mErr" class="err"></div>
+    <div id="mBtns" class="btns"></div>
+  </div>
+</div>
+
+<script src="vendor/xlsx.full.min.js"></script>
+<script>
+(() => {
+  const KEY_ISSUES = 'sts.issues';
+  const KEY_PIN = 'sts.pinHash';
+  const PIN_RE = /^\d{4,8}$/;
+  const AUTO_LOCK_MS = 10 * 60 * 1000;
+
+  // ---------- state ----------
+  let issues = load();
+  let unlocked = false;
+  let filter = '';
+  let lockTimer = null;
+
+  function load() {
+    try {
+      const data = JSON.parse(localStorage.getItem(KEY_ISSUES) || '[]');
+      return Array.isArray(data) ? data.map(normalize) : [];
+    } catch { return []; }
+  }
+  function save() {
+    localStorage.setItem(KEY_ISSUES, JSON.stringify(issues));
+    refreshLists();
+  }
+  function normalize(it) {
+    return {
+      id: Number(it.id) || 0,
+      name: String(it.name ?? ''),
+      description: String(it.description ?? ''),
+      labels: uniq(Array.isArray(it.labels) ? it.labels : splitLabels(it.labels)),
+      assignee: String(it.assignee ?? ''),
+    };
+  }
+  function splitLabels(v) {
+    return String(v ?? '').split(/[,;]/).map(s => s.trim()).filter(Boolean);
+  }
+  function uniq(arr) {
+    const seen = new Set();
+    return arr.map(s => String(s).trim()).filter(s => {
+      const k = s.toLowerCase();
+      if (!s || seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  }
+  function nextId() {
+    return issues.reduce((m, it) => Math.max(m, it.id), 0) + 1;
+  }
+
+  // ---------- PIN ----------
+  async function hashPin(pin) {
+    const text = 'simple-tracker-sheet:' + pin;
+    if (window.crypto?.subtle) {
+      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+      return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+    // Fallback for non-secure contexts (plain http): FNV-1a
+    let h = 0x811c9dc5;
+    for (const c of text) { h ^= c.charCodeAt(0); h = Math.imul(h, 0x01000193) >>> 0; }
+    return 'fnv:' + h.toString(16);
+  }
+  const hasPin = () => !!localStorage.getItem(KEY_PIN);
+
+  function setUnlocked(v) {
+    unlocked = v;
+    clearTimeout(lockTimer);
+    if (v) lockTimer = setTimeout(() => setUnlocked(false), AUTO_LOCK_MS);
+    render();
+  }
+  function touch() {
+    if (unlocked) {
+      clearTimeout(lockTimer);
+      lockTimer = setTimeout(() => setUnlocked(false), AUTO_LOCK_MS);
+    }
+  }
+
+  // Runs `action` once the user is unlocked (asking for / creating the PIN if needed).
+  function requireUnlock(action) {
+    if (unlocked) { touch(); action?.(); return; }
+    if (!hasPin()) {
+      pinModal({
+        title: 'Create a PIN',
+        text: 'Set a 4–8 digit PIN. It will be required to change the data.',
+        confirm: true,
+        onOk: async pin => {
+          localStorage.setItem(KEY_PIN, await hashPin(pin));
+          setUnlocked(true);
+          action?.();
+        },
+      });
+    } else {
+      pinModal({
+        title: 'Enter PIN',
+        text: 'Enter your PIN to edit the tracker.',
+        onOk: async pin => {
+          if (await hashPin(pin) !== localStorage.getItem(KEY_PIN)) return 'Wrong PIN';
+          setUnlocked(true);
+          action?.();
+        },
+      });
+    }
+  }
+
+  function changePin() {
+    pinModal({
+      title: 'Change PIN',
+      text: 'Enter your current PIN.',
+      onOk: async pin => {
+        if (await hashPin(pin) !== localStorage.getItem(KEY_PIN)) return 'Wrong PIN';
+        setTimeout(() => pinModal({
+          title: 'New PIN',
+          text: 'Set a new 4–8 digit PIN.',
+          confirm: true,
+          onOk: async p => { localStorage.setItem(KEY_PIN, await hashPin(p)); touch(); },
+        }));
+      },
+    });
+  }
+
+  // ---------- modal ----------
+  const $ = id => document.getElementById(id);
+  const mBack = $('modalBack'), mTitle = $('mTitle'), mText = $('mText'),
+        mPin1 = $('mPin1'), mPin2 = $('mPin2'), mErr = $('mErr'), mBtns = $('mBtns');
+
+  function closeModal() { mBack.hidden = true; mBtns.innerHTML = ''; }
+
+  function pinModal({ title, text, confirm = false, onOk }) {
+    mTitle.textContent = title;
+    mText.textContent = text;
+    mErr.textContent = '';
+    mPin1.hidden = false;
+    mPin1.value = '';
+    mPin1.placeholder = 'PIN';
+    mPin2.hidden = !confirm;
+    mPin2.value = '';
+    mPin2.placeholder = 'Repeat PIN';
+    mBtns.innerHTML = '';
+    const ok = button('OK', 'primary', submit);
+    mBtns.append(button('Cancel', '', closeModal), ok);
+    mBack.hidden = false;
+    mPin1.focus();
+
+    mPin1.onkeydown = mPin2.onkeydown = e => {
+      if (e.key === 'Enter') submit();
+      if (e.key === 'Escape') closeModal();
+    };
+
+    async function submit() {
+      const pin = mPin1.value.trim();
+      if (!PIN_RE.test(pin)) { mErr.textContent = 'PIN must be 4–8 digits'; return; }
+      if (confirm && pin !== mPin2.value.trim()) { mErr.textContent = 'PINs do not match'; return; }
+      const err = await onOk(pin);
+      if (err) { mErr.textContent = err; mPin1.select(); return; }
+      closeModal();
+    }
+  }
+
+  function choiceModal({ title, text, choices }) {
+    mTitle.textContent = title;
+    mText.textContent = text;
+    mErr.textContent = '';
+    mPin1.hidden = mPin2.hidden = true;
+    mBtns.innerHTML = '';
+    mBtns.append(button('Cancel', '', closeModal));
+    for (const c of choices) mBtns.append(button(c.label, c.cls || '', () => { closeModal(); c.run(); }));
+    mBack.hidden = false;
+  }
+
+  function button(label, cls, onClick) {
+    const b = document.createElement('button');
+    b.textContent = label;
+    if (cls) b.className = cls;
+    b.onclick = onClick;
+    return b;
+  }
+
+  // ---------- rendering ----------
+  function labelColor(label) {
+    let h = 0;
+    for (const c of label.toLowerCase()) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+    return `hsl(${h % 360} 60% 42%)`;
+  }
+
+  function matches(it) {
+    if (!filter) return true;
+    const q = filter.toLowerCase();
+    return [it.name, it.description, it.assignee, ...it.labels, String(it.id)]
+      .some(v => v.toLowerCase().includes(q));
+  }
+
+  function render() {
+    $('lockState').textContent = unlocked ? '🔓 Editing enabled' : '🔒 Read only';
+    $('lockState').className = 'lock-state' + (unlocked ? ' unlocked' : '');
+    $('btnLock').textContent = unlocked ? 'Lock' : (hasPin() ? 'Unlock (PIN)' : 'Set PIN to edit');
+    $('btnChangePin').hidden = !unlocked;
+
+    const tbody = $('rows');
+    tbody.innerHTML = '';
+    const visible = issues.filter(matches);
+    for (const it of visible) tbody.append(renderRow(it));
+
+    const empty = $('empty');
+    empty.hidden = visible.length > 0;
+    empty.textContent = issues.length ? 'No issues match your search.' : 'No issues yet. Click “+ Add Issue” to start.';
+    refreshLists();
+  }
+
+  function renderRow(it) {
+    const tr = document.createElement('tr');
+    tr.dataset.id = it.id;
+
+    const tdId = document.createElement('td');
+    tdId.className = 'id';
+    tdId.textContent = it.id;
+
+    const name = document.createElement('input');
+    name.className = 'cell';
+    name.value = it.name;
+    name.placeholder = unlocked ? 'Issue name' : '';
+    name.disabled = !unlocked;
+    name.oninput = () => { it.name = name.value; save(); touch(); };
+
+    const desc = document.createElement('textarea');
+    desc.className = 'cell';
+    desc.rows = 1;
+    desc.value = it.description;
+    desc.placeholder = unlocked ? 'Description' : '';
+    desc.disabled = !unlocked;
+    desc.oninput = () => { it.description = desc.value; autosize(desc); save(); touch(); };
+    requestAnimationFrame(() => autosize(desc));
+
+    const assignee = document.createElement('input');
+    assignee.className = 'cell';
+    assignee.value = it.assignee;
+    assignee.placeholder = unlocked ? 'Assign to…' : '';
+    assignee.setAttribute('list', 'assigneeList');
+    assignee.disabled = !unlocked;
+    assignee.oninput = () => { it.assignee = assignee.value; save(); touch(); };
+
+    const act = document.createElement('td');
+    act.className = 'act';
+    if (unlocked) {
+      const del = button('🗑', 'danger', () => {
+        if (!confirm(`Delete issue #${it.id} "${it.name}"?`)) return;
+        issues = issues.filter(x => x !== it);
+        save();
+        render();
+      });
+      del.title = 'Delete issue';
+      act.append(del);
+    }
+
+    tr.append(tdId, wrap(name), wrap(desc), renderLabels(it), wrap(assignee), act);
+    return tr;
+  }
+
+  function wrap(el) {
+    const td = document.createElement('td');
+    td.append(el);
+    return td;
+  }
+
+  function autosize(t) {
+    t.style.height = 'auto';
+    t.style.height = t.scrollHeight + 'px';
+  }
+
+  function renderLabels(it) {
+    const td = document.createElement('td');
+    const box = document.createElement('div');
+    box.className = 'labels';
+    td.append(box);
+
+    const redraw = (focus) => {
+      if (!td.isConnected) return;
+      const fresh = renderLabels(it);
+      td.replaceWith(fresh);
+      if (focus) fresh.querySelector('input')?.focus();
+    };
+
+    for (const label of it.labels) {
+      const chip = document.createElement('span');
+      chip.className = 'chip';
+      chip.style.background = labelColor(label);
+      chip.title = 'Filter by this label';
+      chip.append(label);
+      chip.onclick = () => { $('search').value = label; filter = label; render(); };
+      if (unlocked) {
+        const x = document.createElement('button');
+        x.className = 'x';
+        x.textContent = '×';
+        x.title = 'Remove label';
+        x.onclick = e => {
+          e.stopPropagation();
+          it.labels = it.labels.filter(l => l !== label);
+          save();
+          touch();
+          redraw(true);
+        };
+        chip.append(x);
+      }
+      box.append(chip);
+    }
+
+    if (unlocked) {
+      const input = document.createElement('input');
+      input.placeholder = it.labels.length ? '+' : 'Add label…';
+      input.setAttribute('list', 'labelList');
+      const commit = () => {
+        const add = splitLabels(input.value);
+        input.value = '';
+        if (!add.length) return false;
+        it.labels = uniq([...it.labels, ...add]);
+        save();
+        touch();
+        redraw(true);
+        return true;
+      };
+      input.onkeydown = e => {
+        if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); commit(); }
+        else if (e.key === 'Backspace' && !input.value && it.labels.length) {
+          it.labels = it.labels.slice(0, -1);
+          save();
+          redraw(true);
+        }
+      };
+      // Picking an entry from the datalist fires `input` with the full value.
+      input.oninput = e => { if (e.inputType === 'insertReplacementText' || !e.inputType) commit(); };
+      input.onblur = () => { if (input.value.trim()) commit(); };
+      box.append(input);
+      box.onclick = e => { if (e.target === box) input.focus(); };
+    }
+    return td;
+  }
+
+  function refreshLists() {
+    const labels = uniq(issues.flatMap(i => i.labels)).sort((a, b) => a.localeCompare(b));
+    const people = uniq(issues.map(i => i.assignee)).sort((a, b) => a.localeCompare(b));
+    fillList($('labelList'), labels);
+    fillList($('assigneeList'), people);
+  }
+  function fillList(dl, values) {
+    dl.innerHTML = '';
+    for (const v of values) {
+      const o = document.createElement('option');
+      o.value = v;
+      dl.append(o);
+    }
+  }
+
+  // ---------- Excel ----------
+  const HEADERS = ['ID', 'Issue Name', 'Description', 'Labels', 'Assignee'];
+
+  function exportExcel() {
+    const rows = issues.map(i => [i.id, i.name, i.description, i.labels.join(', '), i.assignee]);
+    const ws = XLSX.utils.aoa_to_sheet([HEADERS, ...rows]);
+    ws['!cols'] = [{ wch: 6 }, { wch: 30 }, { wch: 50 }, { wch: 30 }, { wch: 18 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Issues');
+    const d = new Date();
+    const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    XLSX.writeFile(wb, `tracker-${stamp}.xlsx`);
+  }
+
+  const COLUMN_ALIASES = {
+    id: ['id', 'no', 'number'],
+    name: ['issuename', 'issue', 'name', 'title'],
+    description: ['description', 'desc', 'details'],
+    labels: ['labels', 'label', 'tags', 'tag'],
+    assignee: ['assignee', 'assignedto', 'assigned', 'owner', 'pic'],
+  };
+
+  function parseSheet(file) {
+    return file.arrayBuffer().then(buf => {
+      const wb = XLSX.read(buf);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const raw = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
+      return raw.map(row => {
+        const out = {};
+        for (const [key, val] of Object.entries(row)) {
+          const k = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+          for (const [field, aliases] of Object.entries(COLUMN_ALIASES)) {
+            if (aliases.includes(k) && !(field in out)) out[field] = val;
+          }
+        }
+        return out;
+      }).filter(r => String(r.name ?? '').trim() || String(r.description ?? '').trim());
+    });
+  }
+
+  async function importExcel(file) {
+    let rows;
+    try {
+      rows = await parseSheet(file);
+    } catch (e) {
+      alert('Could not read the file: ' + e.message);
+      return;
+    }
+    if (!rows.length) {
+      alert('No issues found. The first sheet needs a header row with at least an "Issue Name" column.');
+      return;
+    }
+    choiceModal({
+      title: 'Import Excel',
+      text: `Found ${rows.length} issue(s) in "${file.name}". Replace the current data or append to it?`,
+      choices: [
+        { label: 'Append', run: () => applyImport(rows, false) },
+        { label: 'Replace all', cls: 'primary', run: () => applyImport(rows, true) },
+      ],
+    });
+  }
+
+  function applyImport(rows, replace) {
+    const imported = rows.map(r => normalize({ ...r, id: 0 }));
+    if (replace) {
+      // Keep the file's IDs when they are valid and unique; otherwise renumber.
+      const ids = rows.map(r => Number(r.id));
+      const keep = ids.every(n => Number.isInteger(n) && n > 0) && new Set(ids).size === ids.length;
+      imported.forEach((it, i) => { it.id = keep ? ids[i] : i + 1; });
+      issues = imported;
+    } else {
+      let id = nextId();
+      imported.forEach(it => { it.id = id++; });
+      issues = [...issues, ...imported];
+    }
+    save();
+    touch();
+    render();
+  }
+
+  // ---------- wiring ----------
+  $('btnAdd').onclick = () => requireUnlock(() => {
+    issues.push({ id: nextId(), name: '', description: '', labels: [], assignee: '' });
+    save();
+    filter = '';
+    $('search').value = '';
+    render();
+    const last = $('rows').lastElementChild;
+    last?.querySelector('input.cell')?.focus();
+    last?.scrollIntoView({ block: 'nearest' });
+  });
+  $('btnExport').onclick = exportExcel;
+  $('btnImport').onclick = () => requireUnlock(() => $('fileInput').click());
+  $('fileInput').onchange = e => {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if (f) importExcel(f);
+  };
+  $('btnLock').onclick = () => unlocked ? setUnlocked(false) : requireUnlock();
+  $('btnChangePin').onclick = changePin;
+  $('search').oninput = e => { filter = e.target.value.trim(); render(); };
+  mBack.onclick = e => { if (e.target === mBack) closeModal(); };
+
+  render();
+})();
+</script>
+</body>
+</html>
