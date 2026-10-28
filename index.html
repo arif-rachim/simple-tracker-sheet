@@ -96,9 +96,19 @@
     max-width: 100%;
     overflow-wrap: anywhere;
   }
+  .chip.scoped { padding: 0; gap: 0; border: 1px solid; overflow: hidden; }
+  .chip.scoped .k { padding: 1px 6px 1px 8px; color: #fff; }
+  .chip.scoped .v { padding: 1px 8px 1px 6px; background: #fff; display: inline-flex; align-items: center; gap: 4px; }
   .chip .x { border: 0; background: none; color: inherit; padding: 0; font-size: 14px; line-height: 1; cursor: pointer; opacity: .8; }
   .chip .x:hover { opacity: 1; }
   .labels input { border: 0; outline: none; font: inherit; min-width: 80px; flex: 1; padding: 2px 0; background: transparent; }
+
+  .filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .filters select {
+    font: inherit; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text);
+  }
+  .filters .active { display: flex; flex-wrap: wrap; gap: 4px; }
+  .filters .count { color: var(--muted); font-size: 12px; margin-left: auto; }
 
   .empty { padding: 32px; text-align: center; color: var(--muted); }
   .hint { color: var(--muted); font-size: 12px; margin-top: 8px; }
@@ -129,7 +139,6 @@
   <button id="btnImport">Import Excel</button>
   <button id="btnExport">Export Excel</button>
   <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" hidden>
-  <input type="search" id="search" placeholder="Search name, label, assignee…">
   <div class="spacer"></div>
   <span id="lockState" class="lock-state"></span>
   <button id="btnChangePin" hidden>Change PIN</button>
@@ -137,6 +146,14 @@
 </header>
 
 <main>
+  <div class="filters">
+    <input type="search" id="search" placeholder="Search text…">
+    <select id="fLabel" title="Filter by label"></select>
+    <select id="fAssignee" title="Filter by assignee"></select>
+    <div id="activeFilters" class="active"></div>
+    <button id="btnClear" hidden>Clear filters</button>
+    <span id="count" class="count"></span>
+  </div>
   <div class="grid-wrap">
     <table>
       <thead>
@@ -154,7 +171,9 @@
     <div id="empty" class="empty" hidden></div>
   </div>
   <div class="hint">
-    Labels: type and press <b>Enter</b> or <b>,</b> to add; click a label to filter by it.
+    Labels: type and press <b>Enter</b> or <b>,</b> to add, or pick an existing one. Use <b>type:value</b> (e.g. <code>status:open</code>)
+    for typed labels: an issue holds one value per type, so adding <code>status:closed</code> replaces <code>status:open</code>.
+    Click a label to filter by it. Label filters of the same type match any of them; different types must all match.<br>
     Data is saved in this browser automatically. Editing requires the PIN.
   </div>
 </main>
@@ -184,7 +203,10 @@
   // ---------- state ----------
   let issues = load();
   let unlocked = false;
-  let filter = '';
+  let filterText = '';
+  let filterLabels = [];
+  let filterAssignee = '';
+  const UNASSIGNED = '\u0000unassigned';
   let lockTimer = null;
 
   function load() {
@@ -202,12 +224,34 @@
       id: Number(it.id) || 0,
       name: String(it.name ?? ''),
       description: String(it.description ?? ''),
-      labels: uniq(Array.isArray(it.labels) ? it.labels : splitLabels(it.labels)),
+      labels: addLabels([], (Array.isArray(it.labels) ? it.labels : splitLabels(it.labels)).map(cleanLabel)),
       assignee: String(it.assignee ?? ''),
     };
   }
   function splitLabels(v) {
-    return String(v ?? '').split(/[,;]/).map(s => s.trim()).filter(Boolean);
+    return String(v ?? '').split(/[,;]/).map(cleanLabel).filter(Boolean);
+  }
+  // "status:open" -> { key: 'status', value: 'open' }; plain labels have an empty key.
+  function parseLabel(label) {
+    const i = label.indexOf(':');
+    if (i <= 0 || i === label.length - 1) return { key: '', value: label };
+    return { key: label.slice(0, i), value: label.slice(i + 1) };
+  }
+  function cleanLabel(label) {
+    const s = String(label ?? '').trim();
+    const { key, value } = parseLabel(s);
+    return key ? `${key.trim()}:${value.trim()}` : s;
+  }
+  const labelKey = l => parseLabel(l).key.toLowerCase();
+  // Adds labels, replacing any existing label of the same type (one value per type).
+  function addLabels(current, add) {
+    let out = [...current];
+    for (const l of add) {
+      const k = labelKey(l);
+      if (k) out = out.filter(x => labelKey(x) !== k);
+      out.push(l);
+    }
+    return uniq(out);
   }
   function uniq(arr) {
     const seen = new Set();
@@ -356,11 +400,123 @@
     return `hsl(${h % 360} 60% 42%)`;
   }
 
+  function makeChip(label, { onClick, onRemove } = {}) {
+    const chip = document.createElement('span');
+    const color = labelColor(label);
+    const { key, value } = parseLabel(label);
+    let tail = chip;
+    chip.className = 'chip';
+    if (key) {
+      chip.classList.add('scoped');
+      chip.style.borderColor = color;
+      const k = document.createElement('span');
+      k.className = 'k';
+      k.style.background = color;
+      k.textContent = key;
+      tail = document.createElement('span');
+      tail.className = 'v';
+      tail.style.color = color;
+      tail.textContent = value;
+      chip.append(k, tail);
+    } else {
+      chip.style.background = color;
+      chip.textContent = label;
+    }
+    if (onClick) {
+      chip.title = 'Filter by this label';
+      chip.onclick = onClick;
+    }
+    if (onRemove) {
+      const x = document.createElement('button');
+      x.className = 'x';
+      x.textContent = '×';
+      x.title = 'Remove';
+      x.onclick = e => { e.stopPropagation(); onRemove(); };
+      tail.append(x);
+    }
+    return chip;
+  }
+
+  function addLabelFilter(label) {
+    if (!filterLabels.some(l => l.toLowerCase() === label.toLowerCase())) filterLabels.push(label);
+    render();
+  }
+
   function matches(it) {
-    if (!filter) return true;
-    const q = filter.toLowerCase();
+    if (filterAssignee) {
+      const a = it.assignee.trim().toLowerCase();
+      if (filterAssignee === UNASSIGNED ? a : a !== filterAssignee.toLowerCase()) return false;
+    }
+    if (filterLabels.length) {
+      // Same type -> any of them (OR); different types / plain labels -> all (AND).
+      const have = new Set(it.labels.map(l => l.toLowerCase()));
+      const groups = new Map();
+      for (const l of filterLabels) {
+        const g = labelKey(l) || '\u0000' + l.toLowerCase();
+        if (!groups.has(g)) groups.set(g, []);
+        groups.get(g).push(l.toLowerCase());
+      }
+      for (const g of groups.values()) if (!g.some(l => have.has(l))) return false;
+    }
+    if (!filterText) return true;
+    const q = filterText.toLowerCase();
     return [it.name, it.description, it.assignee, ...it.labels, String(it.id)]
       .some(v => v.toLowerCase().includes(q));
+  }
+
+  function renderFilters() {
+    const visibleCount = issues.filter(matches).length;
+    const counts = new Map();
+    for (const it of issues) for (const l of it.labels) {
+      const k = l.toLowerCase();
+      if (!counts.has(k)) counts.set(k, { label: l, n: 0 });
+      counts.get(k).n++;
+    }
+    const active = new Set(filterLabels.map(l => l.toLowerCase()));
+    const groups = new Map();
+    for (const { label, n } of counts.values()) {
+      if (active.has(label.toLowerCase())) continue;
+      const { key, value } = parseLabel(label);
+      const g = key || '';
+      if (!groups.has(g)) groups.set(g, []);
+      groups.get(g).push({ label, text: `${value} (${n})` });
+    }
+    const sel = $('fLabel');
+    sel.innerHTML = '<option value="">+ Filter by label…</option>';
+    const names = [...groups.keys()].sort((a, b) => (a === '') - (b === '') || a.localeCompare(b));
+    for (const g of names) {
+      const og = document.createElement('optgroup');
+      og.label = g || 'Other labels';
+      for (const o of groups.get(g).sort((a, b) => a.text.localeCompare(b.text))) {
+        const opt = document.createElement('option');
+        opt.value = o.label;
+        opt.textContent = o.text;
+        og.append(opt);
+      }
+      sel.append(og);
+    }
+
+    const people = uniq(issues.map(i => i.assignee)).sort((a, b) => a.localeCompare(b));
+    const fa = $('fAssignee');
+    fa.innerHTML = '';
+    fa.append(new Option('All assignees', ''), new Option('Unassigned', UNASSIGNED));
+    for (const p of people) fa.append(new Option(p, p));
+    fa.value = filterAssignee;
+
+    const box = $('activeFilters');
+    box.innerHTML = '';
+    for (const l of filterLabels) {
+      box.append(makeChip(l, { onRemove: () => { filterLabels = filterLabels.filter(x => x !== l); render(); } }));
+    }
+    $('btnClear').hidden = !(filterLabels.length || filterAssignee || filterText);
+    $('count').textContent = `${visibleCount} of ${issues.length} issue(s)`;
+  }
+
+  function clearFilters() {
+    filterText = '';
+    filterLabels = [];
+    filterAssignee = '';
+    $('search').value = '';
   }
 
   function render() {
@@ -376,7 +532,7 @@
 
     const empty = $('empty');
     empty.hidden = visible.length > 0;
-    empty.textContent = issues.length ? 'No issues match your search.' : 'No issues yet. Click “+ Add Issue” to start.';
+    empty.textContent = issues.length ? 'No issues match the filters.' : 'No issues yet. Click “+ Add Issue” to start.';
     refreshLists();
   }
 
@@ -460,38 +616,26 @@
     };
 
     for (const label of it.labels) {
-      const chip = document.createElement('span');
-      chip.className = 'chip';
-      chip.style.background = labelColor(label);
-      chip.title = 'Filter by this label';
-      chip.append(label);
-      chip.onclick = () => { $('search').value = label; filter = label; render(); };
-      if (unlocked) {
-        const x = document.createElement('button');
-        x.className = 'x';
-        x.textContent = '×';
-        x.title = 'Remove label';
-        x.onclick = e => {
-          e.stopPropagation();
+      box.append(makeChip(label, {
+        onClick: () => addLabelFilter(label),
+        onRemove: unlocked ? () => {
           it.labels = it.labels.filter(l => l !== label);
           save();
           touch();
           redraw(true);
-        };
-        chip.append(x);
-      }
-      box.append(chip);
+        } : null,
+      }));
     }
 
     if (unlocked) {
       const input = document.createElement('input');
-      input.placeholder = it.labels.length ? '+' : 'Add label…';
+      input.placeholder = it.labels.length ? '+' : 'Add label (e.g. status:open)…';
       input.setAttribute('list', 'labelList');
       const commit = () => {
         const add = splitLabels(input.value);
         input.value = '';
         if (!add.length) return false;
-        it.labels = uniq([...it.labels, ...add]);
+        it.labels = addLabels(it.labels, add);
         save();
         touch();
         redraw(true);
@@ -519,6 +663,7 @@
     const people = uniq(issues.map(i => i.assignee)).sort((a, b) => a.localeCompare(b));
     fillList($('labelList'), labels);
     fillList($('assigneeList'), people);
+    renderFilters();
   }
   function fillList(dl, values) {
     dl.innerHTML = '';
@@ -613,8 +758,7 @@
   $('btnAdd').onclick = () => requireUnlock(() => {
     issues.push({ id: nextId(), name: '', description: '', labels: [], assignee: '' });
     save();
-    filter = '';
-    $('search').value = '';
+    clearFilters();
     render();
     const last = $('rows').lastElementChild;
     last?.querySelector('.cell')?.focus();
@@ -629,7 +773,10 @@
   };
   $('btnLock').onclick = () => unlocked ? setUnlocked(false) : requireUnlock();
   $('btnChangePin').onclick = changePin;
-  $('search').oninput = e => { filter = e.target.value.trim(); render(); };
+  $('search').oninput = e => { filterText = e.target.value.trim(); render(); };
+  $('fLabel').onchange = e => { if (e.target.value) addLabelFilter(e.target.value); };
+  $('fAssignee').onchange = e => { filterAssignee = e.target.value; render(); };
+  $('btnClear').onclick = () => { clearFilters(); render(); };
   window.addEventListener('resize', () => document.querySelectorAll('textarea.cell').forEach(autosize));
   mBack.onclick = e => { if (e.target === mBack) closeModal(); };
 

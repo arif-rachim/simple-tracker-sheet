@@ -7,9 +7,14 @@ Tracker issue sederhana berbentuk grid, satu file HTML, tanpa server.
 Buka `index.html` di browser (folder `vendor/` harus ikut).
 
 - **+ Add Issue**: tambah baris baru (Issue Name, Description, Labels, Assignee).
-- **Labels**: ketik lalu tekan `Enter` atau `,`. Satu issue bisa punya banyak label. Klik label untuk filter, `×` untuk hapus.
+- **Labels**: ketik lalu tekan `Enter` atau `,`, atau pilih dari saran label yang sudah ada. Satu issue bisa punya banyak label. `×` untuk hapus.
+- **Label bertipe** (`tipe:nilai`), contoh `status:open`, `status:closed`, `priority:high`. Tampil dua bagian (tipe | nilai).
+  Satu issue hanya punya satu nilai per tipe: menambah `status:closed` otomatis mengganti `status:open`.
+- **Filter**: pilih label dari dropdown *Filter by label* (dikelompokkan per tipe, dengan jumlah issue), atau klik label di grid.
+  Label dengan tipe yang sama = salah satu cocok (OR), tipe berbeda = semua harus cocok (AND).
+  Contoh: `status:open` + `status:in-progress` + `feature` → issue *feature* yang open **atau** in-progress.
+  Bisa juga filter per assignee (termasuk *Unassigned*) dan cari teks bebas.
 - **Assignee**: ketik nama; nama yang sudah pernah dipakai muncul sebagai saran.
-- **Search**: filter berdasarkan nama, deskripsi, label, atau assignee.
 - **Export Excel**: download `.xlsx` (kolom: ID, Issue Name, Description, Labels, Assignee; label dipisah koma).
 - **Import Excel**: baca sheet pertama dari `.xlsx`/`.xls`/`.csv` dengan header yang sama, lalu pilih *Append* atau *Replace all*.
 
