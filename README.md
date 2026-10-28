@@ -9,7 +9,8 @@ Butuh Python 3.8+ saja (tanpa install library apa pun):
 ```bash
 python3 server.py                 # buka http://localhost:8000
 python3 server.py --port 9000     # port lain
-python3 server.py --set-pin       # set / reset PIN (misalnya kalau lupa)
+python3 server.py --set-pin       # set / reset PIN (ditanya), misalnya kalau lupa
+python3 server.py --set-pin 5678  # set / reset PIN langsung
 ```
 
 Orang lain di jaringan yang sama bisa membuka `http://<IP-komputer-server>:8000`.
@@ -47,11 +48,11 @@ versi browser, lalu Import Excel di halaman server.
 ## PIN
 
 Data defaultnya **read-only**. Untuk mengubah (tambah, edit, hapus, import, manage labels) harus masukkan PIN 4–8 digit.
-Pertama kali, aplikasi minta buat PIN. Klik **Lock** untuk mengunci lagi; otomatis terkunci setelah 10 menit tidak aktif
+PIN default **1234**; sebaiknya diganti lewat **Change PIN**. Klik **Lock** untuk mengunci lagi; otomatis terkunci setelah 10 menit tidak aktif
 atau saat halaman di-reload. PIN bisa diganti lewat **Change PIN** saat sedang unlocked.
 
 Dengan server, PIN dicek di server: tanpa PIN, server menolak semua perubahan. Setelah 5 PIN salah, perangkat itu
-harus menunggu 5 menit. Lupa PIN: jalankan `python3 server.py --set-pin` di komputer server.
+harus menunggu 5 menit. Lupa PIN: jalankan `python3 server.py --set-pin 1234` di komputer server.
 
 Excel `.xlsx` diproses dengan [ExcelJS](https://github.com/exceljs/exceljs) 4.4.0 (`vendor/exceljs.min.js`) supaya format ikut tersimpan;
 `.xls`/`.csv` dibaca dengan [SheetJS](https://sheetjs.com) 0.20.3 (`vendor/xlsx.full.min.js`), tanpa format.

@@ -6,7 +6,10 @@ opens the page edits the same data. Standard library only.
 
     python3 server.py                 # http://localhost:8000
     python3 server.py --port 9000 --data /srv/tracker
-    python3 server.py --set-pin       # set / reset the edit PIN
+    python3 server.py --set-pin       # set / reset the edit PIN (asks for it)
+    python3 server.py --set-pin 5678  # set / reset the edit PIN directly
+
+The edit PIN starts as 1234 until it is changed.
 """
 import argparse
 import getpass
@@ -31,6 +34,7 @@ STATIC_FILES = {
     "/vendor/exceljs.min.js": ("vendor/exceljs.min.js", "text/javascript; charset=utf-8"),
 }
 PIN_RE = re.compile(r"^\d{4,8}$")
+DEFAULT_PIN = "1234"
 MAX_BODY = 20 * 1024 * 1024
 TOKEN_TTL = 15 * 60          # seconds of inactivity before an unlock expires
 MAX_FAILS = 5                # wrong PINs per client before a cool-down
@@ -54,6 +58,9 @@ class Store:
         self.lock = threading.Lock()
         self.data = self._read(self.data_file) or {"version": 0, "lastId": 0, "issues": [], "labels": []}
         self.pin = self._read(self.pin_file)
+        if self.pin is None:
+            self.set_pin(DEFAULT_PIN)
+            print(f"No PIN was set: the edit PIN is now {DEFAULT_PIN} (change it in the app or with --set-pin).")
         self.tokens = {}     # token -> expiry timestamp
         self.fails = {}      # client ip -> (count, first failure time)
 
@@ -245,14 +252,17 @@ def main():
     ap.add_argument("--host", default="0.0.0.0", help="address to listen on (default: all interfaces)")
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--data", default=str(APP_DIR / "data"), help="folder for tracker.json and pin.json")
-    ap.add_argument("--set-pin", action="store_true", help="set or reset the edit PIN, then exit")
+    ap.add_argument("--set-pin", nargs="?", const="", metavar="PIN",
+                    help="set or reset the edit PIN, then exit (asks for it when no PIN is given)")
     args = ap.parse_args()
 
     store = Store(args.data)
-    if args.set_pin:
-        pin = getpass.getpass("New PIN (4-8 digits): ")
-        if pin != getpass.getpass("Repeat PIN: "):
-            raise SystemExit("PINs do not match")
+    if args.set_pin is not None:
+        pin = args.set_pin
+        if not pin:
+            pin = getpass.getpass("New PIN (4-8 digits): ")
+            if pin != getpass.getpass("Repeat PIN: "):
+                raise SystemExit("PINs do not match")
         try:
             store.set_pin(pin)
         except ApiError as e:

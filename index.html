@@ -279,6 +279,7 @@
   // People who can approve an issue (shown in the "Approved By" column).
   const APPROVERS = ['Capt Mohamed', 'Capt Abdullah'];
   const PIN_RE = /^\d{4,8}$/;
+  const DEFAULT_PIN = '1234';   // used until someone changes it
   const AUTO_LOCK_MS = 10 * 60 * 1000;
 
   // ---------- state ----------
@@ -1429,6 +1430,7 @@
   }
 
   async function init() {
+    if (!localStorage.getItem(KEY_PIN)) localStorage.setItem(KEY_PIN, await hashPin(DEFAULT_PIN));
     if (location.protocol.startsWith('http')) {
       try {
         server = {};
