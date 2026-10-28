@@ -58,6 +58,8 @@
   }
   .lock-state { font-size: 12px; color: var(--muted); }
   .lock-state.unlocked { color: #15803d; font-weight: 600; }
+  .sync-state { font-size: 12px; color: var(--muted); }
+  .sync-state.warn { color: var(--danger); font-weight: 600; }
 
   main { padding: 16px; }
   .grid-wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
@@ -79,28 +81,35 @@
     resize: none;
     outline: none;
   }
-  td input.cell:focus { box-shadow: inset 0 0 0 2px var(--accent); }
   td input.cell:disabled { color: inherit; cursor: default; }
   td select.cell { width: 100%; border: 0; background: transparent; font: inherit; color: var(--muted); padding: 8px 4px; outline: none; cursor: pointer; }
-  td select.cell:focus { box-shadow: inset 0 0 0 2px var(--accent); }
   td .approval { padding: 8px; color: var(--muted); }
   td .approved, td select.cell.approved { color: #15803d; font-weight: 600; }
   td .rich { padding: 8px; min-height: 36px; outline: none; white-space: pre-wrap; overflow-wrap: anywhere; }
-  td .rich:focus { box-shadow: inset 0 0 0 2px var(--accent); }
   td .rich:empty::before { content: attr(data-placeholder); color: #9aa5b1; }
   td.active-cell { outline: 2px solid var(--accent); outline-offset: -2px; }
 
   .fmt-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 12px; }
   .fmt-bar .fmt-title { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; }
-  .fmt-bar button { min-width: 34px; padding: 5px 10px; }
+  .fmt-bar button, .fmt-bar .split { height: 32px; }
+  .fmt-bar button { min-width: 34px; padding: 0 10px; display: inline-flex; align-items: center; justify-content: center; }
   .fmt-bar button.on { background: #e8efff; border-color: var(--accent); }
-  .fmt-bar .split { display: inline-flex; align-items: stretch; }
-  .fmt-bar .split button { border-radius: 6px 0 0 6px; display: inline-flex; flex-direction: column; align-items: center; line-height: 1.1; }
-  .fmt-bar .split .bar { display: block; width: 18px; height: 4px; margin-top: 2px; border-radius: 1px; }
-  .fmt-bar input[type=color] {
-    width: 26px; padding: 0 2px; border: 1px solid var(--border); border-left: 0; border-radius: 0 6px 6px 0;
-    background: var(--panel); cursor: pointer;
+  /* Split button: [apply current color | pick color] as one bordered control */
+  .fmt-bar .split {
+    display: inline-flex; align-items: stretch; border: 1px solid var(--border); border-radius: 6px;
+    overflow: hidden; background: var(--panel);
   }
+  .fmt-bar .split:hover { border-color: var(--accent); }
+  .fmt-bar .split button { height: 100%; border: 0; border-radius: 0; flex-direction: column; gap: 3px; line-height: 1; }
+  .fmt-bar .split .bar { display: block; width: 16px; height: 3px; border-radius: 1px; }
+  .fmt-bar input[type=color] {
+    -webkit-appearance: none; appearance: none; width: 28px; height: 100%; padding: 0; margin: 0;
+    border: 0; border-left: 1px solid var(--border); background: transparent; cursor: pointer;
+  }
+  .fmt-bar input[type=color]::-webkit-color-swatch-wrapper { padding: 8px 7px; }
+  .fmt-bar input[type=color]::-webkit-color-swatch { border: 0; border-radius: 3px; }
+  .fmt-bar input[type=color]::-moz-color-swatch { border: 0; border-radius: 3px; }
+  .fmt-bar input[type=color]:disabled { opacity: .45; cursor: not-allowed; }
   .fmt-bar .fmt-hint { color: var(--muted); font-size: 12px; }
 
   .labels { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 8px; min-height: 36px; align-items: center; }
@@ -172,6 +181,7 @@
   <button id="btnLabels">Manage Labels</button>
   <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" hidden>
   <div class="spacer"></div>
+  <span id="syncState" class="sync-state"></span>
   <span id="lockState" class="lock-state"></span>
   <button id="btnChangePin" hidden>Change PIN</button>
   <button id="btnLock"></button>
@@ -225,7 +235,7 @@
     Click a label to filter by it. Label filters of the same type match any of them; different types must all match.<br>
     Format: click a cell (or select part of its text) and use <b>B</b>, <i>I</i>, <b>A</b> (text color) or <b>Fill</b> (cell color);
     Ctrl+B / Ctrl+I also work while typing.<br>
-    Data is saved in this browser automatically. Editing requires the PIN.
+    Changes are saved automatically. Editing requires the PIN.
   </div>
 </main>
 
@@ -286,6 +296,8 @@
   const ANY_APPROVED = '\u0000any';
   const UNASSIGNED = '\u0000unassigned';
   let lockTimer = null;
+  // Set when the page is served by server.py: { token, hasPin, version, synced, syncedLabels }.
+  let server = null;
 
   function readJson(key) {
     try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch { return []; }
@@ -299,7 +311,8 @@
     return Array.isArray(data) ? uniq(data.map(cleanLabel)) : [];
   }
   function saveLabels() {
-    localStorage.setItem(KEY_LABELS, JSON.stringify(labelRegistry));
+    if (server) scheduleSync();
+    else localStorage.setItem(KEY_LABELS, JSON.stringify(labelRegistry));
   }
   const sameLabel = (a, b) => a.toLowerCase() === b.toLowerCase();
   function allLabels() {
@@ -309,7 +322,8 @@
     return issues.filter(it => it.labels.some(l => sameLabel(l, label))).length;
   }
   function save() {
-    localStorage.setItem(KEY_ISSUES, JSON.stringify(issues));
+    if (server) scheduleSync();
+    else localStorage.setItem(KEY_ISSUES, JSON.stringify(issues));
     refreshLists();
   }
   function normalize(it) {
@@ -405,19 +419,57 @@
     for (const c of text) { h ^= c.charCodeAt(0); h = Math.imul(h, 0x01000193) >>> 0; }
     return 'fnv:' + h.toString(16);
   }
-  const hasPin = () => !!localStorage.getItem(KEY_PIN);
+  const hasPin = () => (server ? server.hasPin : !!localStorage.getItem(KEY_PIN));
+
+  // PIN checks run on the server when there is one, otherwise against this browser's storage.
+  // pinUnlock / pinChange return an error message, or '' when it worked.
+  async function pinSetup(pin) {
+    if (!server) { localStorage.setItem(KEY_PIN, await hashPin(pin)); return ''; }
+    try {
+      server.token = (await api('POST', '/api/pin/setup', { pin })).token;
+      server.hasPin = true;
+      return '';
+    } catch (e) {
+      if (e.status === 409) server.hasPin = true;
+      return e.message;
+    }
+  }
+  async function pinUnlock(pin) {
+    if (!server) return await hashPin(pin) === localStorage.getItem(KEY_PIN) ? '' : 'Wrong PIN';
+    try {
+      server.token = (await api('POST', '/api/unlock', { pin })).token;
+      return '';
+    } catch (e) { return e.message; }
+  }
+  async function pinChange(oldPin, newPin) {
+    if (!server) { localStorage.setItem(KEY_PIN, await hashPin(newPin)); return ''; }
+    try {
+      await api('POST', '/api/pin/change', { old: oldPin, new: newPin });
+      return '';
+    } catch (e) { return e.message; }
+  }
 
   function setUnlocked(v) {
     unlocked = v;
     clearTimeout(lockTimer);
-    if (v) lockTimer = setTimeout(() => setUnlocked(false), AUTO_LOCK_MS);
-    else $('labelsBack').hidden = true;
+    if (v) lockTimer = setTimeout(lock, AUTO_LOCK_MS);
+    else {
+      $('labelsBack').hidden = true;
+      if (server?.token) api('POST', '/api/lock').catch(() => {});
+      if (server) server.token = null;
+    }
     render();
+    if (v && server) scheduleSync(0);
+  }
+  // Saves anything pending before giving up the edit session.
+  async function lock() {
+    if (server) await sync();
+    setUnlocked(false);
   }
   function touch() {
     if (unlocked) {
       clearTimeout(lockTimer);
-      lockTimer = setTimeout(() => setUnlocked(false), AUTO_LOCK_MS);
+      lockTimer = setTimeout(lock, AUTO_LOCK_MS);
     }
   }
 
@@ -430,7 +482,8 @@
         text: 'Set a 4–8 digit PIN. It will be required to change the data.',
         confirm: true,
         onOk: async pin => {
-          localStorage.setItem(KEY_PIN, await hashPin(pin));
+          const err = await pinSetup(pin);
+          if (err) return err;
           setUnlocked(true);
           action?.();
         },
@@ -440,7 +493,8 @@
         title: 'Enter PIN',
         text: 'Enter your PIN to edit the tracker.',
         onOk: async pin => {
-          if (await hashPin(pin) !== localStorage.getItem(KEY_PIN)) return 'Wrong PIN';
+          const err = await pinUnlock(pin);
+          if (err) return err;
           setUnlocked(true);
           action?.();
         },
@@ -453,12 +507,17 @@
       title: 'Change PIN',
       text: 'Enter your current PIN.',
       onOk: async pin => {
-        if (await hashPin(pin) !== localStorage.getItem(KEY_PIN)) return 'Wrong PIN';
+        const err = await pinUnlock(pin);
+        if (err) return err;
         setTimeout(() => pinModal({
           title: 'New PIN',
           text: 'Set a new 4–8 digit PIN.',
           confirm: true,
-          onOk: async p => { localStorage.setItem(KEY_PIN, await hashPin(p)); touch(); },
+          onOk: async p => {
+            const e = await pinChange(pin, p);
+            if (e) return e;
+            touch();
+          },
         }));
       },
     });
@@ -1275,6 +1334,123 @@
     labelsChanged();
   }
 
+  // ---------- server ----------
+  async function api(method, path, body) {
+    const res = await fetch(path, {
+      method,
+      headers: { 'Content-Type': 'application/json', ...(server?.token && { 'X-Token': server.token }) },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw Object.assign(new Error(data.error || res.statusText), { status: res.status });
+    return data;
+  }
+
+  function setSyncState(msg, warn = false) {
+    $('syncState').textContent = msg;
+    $('syncState').classList.toggle('warn', warn);
+  }
+
+  function applyServerState(data) {
+    issues = (data.issues || []).map(normalize);
+    labelRegistry = uniq((data.labels || []).map(cleanLabel));
+    server.version = data.version;
+    server.hasPin = !!data.hasPin;
+    server.synced = new Map(issues.map(it => [it.id, JSON.stringify(it)]));
+    server.syncedLabels = JSON.stringify(labelRegistry);
+  }
+
+  // What changed locally since the last successful save, found by comparing with the synced copy.
+  function pendingChanges() {
+    const upsert = issues.filter(it => server.synced.get(it.id) !== JSON.stringify(it));
+    const ids = new Set(issues.map(it => it.id));
+    const del = [...server.synced.keys()].filter(id => !ids.has(id));
+    const labels = JSON.stringify(labelRegistry) !== server.syncedLabels ? labelRegistry : null;
+    return upsert.length || del.length || labels ? { upsert, delete: del, labels } : null;
+  }
+
+  let syncTimer = null;
+  let syncing = null;
+  function scheduleSync(delay = 500) {
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(sync, delay);
+  }
+
+  async function sync() {
+    clearTimeout(syncTimer);
+    if (syncing) { await syncing; return sync(); }
+    const changes = pendingChanges();
+    if (!changes) return;
+    if (!unlocked) { setSyncState('Unsaved changes: unlock to save', true); return; }
+    // Remember exactly what was sent; edits made meanwhile go out with the next save.
+    const sent = changes.upsert.map(it => [it.id, JSON.stringify(it)]);
+    const sentLabels = changes.labels && JSON.stringify(changes.labels);
+    setSyncState('Saving…');
+    syncing = api('POST', '/api/sync', changes).then(() => {
+      for (const [id, json] of sent) server.synced.set(id, json);
+      for (const id of changes.delete) server.synced.delete(id);
+      if (sentLabels) server.syncedLabels = sentLabels;
+      setSyncState('All changes saved');
+    }, e => {
+      if (e.status === 401) {
+        setUnlocked(false);
+        setSyncState('Edit session expired: unlock to save your changes', true);
+      } else {
+        setSyncState(`Not saved (${e.message}), retrying…`, true);
+        scheduleSync(3000);
+      }
+    });
+    await syncing;
+    syncing = null;
+    if (unlocked && pendingChanges()) scheduleSync();
+  }
+
+  // Picks up other people's changes. Waits while this user is typing or has unsaved edits.
+  async function poll() {
+    try {
+      const data = await api('GET', `/api/state?since=${server.version}`);
+      if (server.offline) {
+        server.offline = false;
+        setSyncState(pendingChanges() ? 'Unsaved changes' : 'Connected to server');
+      }
+      const busy = $('rows').contains(document.activeElement) || $('fmtBar').contains(document.activeElement)
+        || !mBack.hidden || !$('labelsBack').hidden;
+      if (!data.unchanged && !busy && !syncing && !pendingChanges()) {
+        const same = JSON.stringify(data.issues.map(normalize)) === JSON.stringify(issues)
+          && JSON.stringify(uniq(data.labels.map(cleanLabel))) === JSON.stringify(labelRegistry);
+        applyServerState(data);
+        if (!same) render();
+      }
+    } catch {
+      server.offline = true;
+      setSyncState('Server not reachable', true);
+    }
+    setTimeout(poll, 4000);
+  }
+
+  async function init() {
+    if (location.protocol.startsWith('http')) {
+      try {
+        server = {};
+        applyServerState(await api('GET', '/api/state'));
+        setSyncState('Connected to server');
+        setTimeout(poll, 4000);
+      } catch {
+        server = null;
+      }
+    }
+    if (!server) setSyncState('Saved in this browser only (no server)');
+    render();
+  }
+
+  window.addEventListener('beforeunload', e => {
+    if (server && pendingChanges()) {
+      sync();
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
+
   // ---------- wiring ----------
   $('btnLabels').onclick = () => requireUnlock(openLabelManager);
   $('rows').addEventListener('focusin', e => {
@@ -1305,13 +1481,27 @@
   $('lmClose').onclick = () => { $('labelsBack').hidden = true; };
   $('labelsBack').onclick = e => { if (e.target === $('labelsBack')) $('labelsBack').hidden = true; };
   document.addEventListener('keydown', e => { if (e.key === 'Escape') $('labelsBack').hidden = true; });
-  $('btnAdd').onclick = () => requireUnlock(() => {
-    issues.push(normalize({ id: nextId() }));
+  $('btnAdd').onclick = () => requireUnlock(async () => {
+    let it;
+    if (server) {
+      // The server hands out ids so two people adding at once never collide.
+      try {
+        it = normalize((await api('POST', '/api/issues')).issue);
+      } catch (e) {
+        if (e.status === 401) setUnlocked(false);
+        alert('Could not add the issue: ' + e.message);
+        return;
+      }
+      server.synced.set(it.id, JSON.stringify(it));
+    } else {
+      it = normalize({ id: nextId() });
+    }
+    issues.push(it);
     save();
     clearFilters();
     render();
     const last = $('rows').lastElementChild;
-    last?.querySelector('.cell')?.focus();
+    last?.querySelector('.rich')?.focus();
     last?.scrollIntoView({ block: 'nearest' });
   });
   $('btnExport').onclick = exportExcel;
@@ -1321,7 +1511,7 @@
     e.target.value = '';
     if (f) importExcel(f);
   };
-  $('btnLock').onclick = () => unlocked ? setUnlocked(false) : requireUnlock();
+  $('btnLock').onclick = () => unlocked ? lock() : requireUnlock();
   $('btnChangePin').onclick = changePin;
   $('search').oninput = e => { filterText = e.target.value.trim(); render(); };
   $('fLabel').onchange = e => { if (e.target.value) addLabelFilter(e.target.value); };
@@ -1330,7 +1520,7 @@
   $('btnClear').onclick = () => { clearFilters(); render(); };
   mBack.onclick = e => { if (e.target === mBack) closeModal(); };
 
-  render();
+  init();
 })();
 </script>
 </body>
