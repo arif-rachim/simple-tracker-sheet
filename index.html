@@ -93,7 +93,8 @@
     font-size: 12px;
     color: #fff;
     cursor: pointer;
-    white-space: nowrap;
+    max-width: 100%;
+    overflow-wrap: anywhere;
   }
   .chip .x { border: 0; background: none; color: inherit; padding: 0; font-size: 14px; line-height: 1; cursor: pointer; opacity: .8; }
   .chip .x:hover { opacity: 1; }
@@ -387,12 +388,18 @@
     tdId.className = 'id';
     tdId.textContent = it.id;
 
-    const name = document.createElement('input');
+    const name = document.createElement('textarea');
     name.className = 'cell';
+    name.rows = 1;
     name.value = it.name;
     name.placeholder = unlocked ? 'Issue name' : '';
     name.disabled = !unlocked;
-    name.oninput = () => { it.name = name.value; save(); touch(); };
+    // Issue name is a single line of text that wraps visually; Enter does not add a newline.
+    name.onkeydown = e => { if (e.key === 'Enter') e.preventDefault(); };
+    name.oninput = () => {
+      if (name.value.includes('\n')) name.value = name.value.replace(/\s*\n\s*/g, ' ');
+      it.name = name.value; autosize(name); save(); touch();
+    };
 
     const desc = document.createElement('textarea');
     desc.className = 'cell';
@@ -401,7 +408,7 @@
     desc.placeholder = unlocked ? 'Description' : '';
     desc.disabled = !unlocked;
     desc.oninput = () => { it.description = desc.value; autosize(desc); save(); touch(); };
-    requestAnimationFrame(() => autosize(desc));
+    requestAnimationFrame(() => { autosize(name); autosize(desc); });
 
     const assignee = document.createElement('input');
     assignee.className = 'cell';
@@ -610,7 +617,7 @@
     $('search').value = '';
     render();
     const last = $('rows').lastElementChild;
-    last?.querySelector('input.cell')?.focus();
+    last?.querySelector('.cell')?.focus();
     last?.scrollIntoView({ block: 'nearest' });
   });
   $('btnExport').onclick = exportExcel;
@@ -623,6 +630,7 @@
   $('btnLock').onclick = () => unlocked ? setUnlocked(false) : requireUnlock();
   $('btnChangePin').onclick = changePin;
   $('search').oninput = e => { filter = e.target.value.trim(); render(); };
+  window.addEventListener('resize', () => document.querySelectorAll('textarea.cell').forEach(autosize));
   mBack.onclick = e => { if (e.target === mBack) closeModal(); };
 
   render();
