@@ -23,14 +23,31 @@ versi browser, lalu Import Excel di halaman server.
 
 ## Cara pakai
 
-- **+ Add Issue**: tambah baris baru (Issue Name, Description, Labels, Assignee).
+- **+ Add Issue**: tambah baris baru (Issue Name, Description, Status, Priority, Labels, Assignee, Approved By).
+- **Status tersimpan atau belum**: badge di kanan atas menunjukkan *● Not saved yet* (kuning), *⟳ Saving…* (biru),
+  *✓ All changes saved* (hijau), atau pesan merah kalau gagal. Baris yang perubahannya belum sampai ke server
+  ditandai **●** kuning di kolom `#`, dan judul tab diawali `●`. Tutup halaman setelah muncul *✓ All changes saved*.
+  Klik badge itu untuk menyimpan sekarang juga lalu mencocokkan dengan data di server: hasilnya
+  *✓ All changes saved · checked jam:menit:detik*, atau *Server differs: #…* kalau versi di server berbeda
+  (biasanya karena orang lain baru mengubah baris itu; reload halaman untuk melihatnya).
+  Perubahan dikirim ±0,5 detik setelah berhenti mengetik (paling lambat 2 detik walau terus mengetik), dan langsung dikirim
+  saat tab ditutup/di-reload/disembunyikan.
+- **Status**: ketik bebas seperti Assignee; saran *Open*, *In Progress*, *Blocked*, *Done* plus status yang sudah pernah dipakai.
+  Daftar saran ada di konstanta `STATUSES` di `index.html`.
+- **Priority**: pilih *Critical*, *High*, *Medium*, *Low* (atau kosong). Daftar ada di konstanta `PRIORITIES`.
+- **Urutan (sort)**: dropdown *Sort* di baris filter: *Priority* (default; Critical dulu, yang kosong paling bawah),
+  *Manual order*, *Status*, *Assignee*, *Newest first*, *Oldest first*. Pilihan sort diingat per browser.
+- **Drag & drop baris** (saat unlocked, di sort *Priority* atau *Manual order*): tarik ikon **⠿** di kolom `#`.
+  Di sort *Priority*, baris hanya bisa dipindah di antara baris dengan priority yang sama. Urutan ini tersimpan di server.
+- **Lebar kolom**: tarik tepi kanan judul kolom untuk resize, double-click untuk kembali ke lebar awal.
+  Lebar kolom diingat per browser.
 - **Labels**: ketik lalu tekan `Enter` atau `,`, atau pilih dari saran label yang sudah ada. Satu issue bisa punya banyak label. `×` untuk hapus.
 - **Label bertipe** (`tipe:nilai`), contoh `status:open`, `status:closed`, `priority:high`. Tampil dua bagian (tipe | nilai).
   Satu issue hanya punya satu nilai per tipe: menambah `status:closed` otomatis mengganti `status:open`.
 - **Filter**: pilih label dari dropdown *Filter by label* (dikelompokkan per tipe, dengan jumlah issue), atau klik label di grid.
   Label dengan tipe yang sama = salah satu cocok (OR), tipe berbeda = semua harus cocok (AND).
   Contoh: `status:open` + `status:in-progress` + `feature` → issue *feature* yang open **atau** in-progress.
-  Bisa juga filter per assignee (termasuk *Unassigned*) dan cari teks bebas.
+  Bisa juga filter per assignee (termasuk *Unassigned*), status, priority, dan cari teks bebas.
 - **Format** (toolbar muncul saat unlocked): klik sel, atau blok sebagian teksnya, lalu pilih
   **B** (bold), **I** (italic), **A** (warna teks), **Fill** (warna background sel), atau **Clear** (hapus format).
   Tanpa blok teks, format berlaku untuk seluruh sel. Ctrl+B / Ctrl+I juga bisa saat mengetik.
@@ -42,7 +59,7 @@ versi browser, lalu Import Excel di halaman server.
   - **Rename**: ganti nama di semua issue sekaligus, misalnya `status:done` → `status:closed`. Kalau nama barunya sudah ada, kedua label digabung;
   - **Delete**: hapus label dari semua issue.
 - **Assignee**: ketik nama; nama yang sudah pernah dipakai muncul sebagai saran.
-- **Export Excel**: download `.xlsx` (kolom: ID, Issue Name, Description, Labels, Assignee, Approved By; label dipisah koma), termasuk format bold/italic/warna teks dan warna background sel, plus sheet `Labels` berisi daftar semua label supaya label yang belum dipakai ikut tersimpan.
+- **Export Excel**: download `.xlsx` (kolom: ID, Issue Name, Description, Status, Priority, Labels, Assignee, Approved By; label dipisah koma; baris sesuai urutan sort saat ini), termasuk format bold/italic/warna teks dan warna background sel, plus sheet `Labels` berisi daftar semua label supaya label yang belum dipakai ikut tersimpan.
 - **Import Excel**: baca sheet pertama dari `.xlsx`/`.xls`/`.csv` dengan header yang sama, lalu pilih *Append* atau *Replace all*.
 
 ## PIN

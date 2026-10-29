@@ -58,19 +58,46 @@
   }
   .lock-state { font-size: 12px; color: var(--muted); }
   .lock-state.unlocked { color: #15803d; font-weight: 600; }
-  .sync-state { font-size: 12px; color: var(--muted); }
-  .sync-state.warn { color: var(--danger); font-weight: 600; }
+  /* Save status badge: tells people when it is safe to close the page. */
+  .sync-state {
+    font-size: 12px; color: var(--muted); padding: 3px 10px; border-radius: 999px;
+    border: 1px solid transparent; white-space: nowrap; background: transparent;
+  }
+  .sync-state.ok { color: #15803d; background: #ecfdf3; border-color: #bbf7d0; }
+  .sync-state.pending { color: #b45309; background: #fffbeb; border-color: #fcd34d; font-weight: 600; }
+  .sync-state.saving { color: var(--accent); background: #eff6ff; border-color: #bfdbfe; font-weight: 600; }
+  .sync-state.warn { color: var(--danger); background: #fef2f2; border-color: #fecaca; font-weight: 600; }
+  .sync-state.pending, .sync-state.saving { animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .55; } }
 
   main { padding: 16px; }
-  .grid-wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
-  table { width: 100%; border-collapse: collapse; min-width: 960px; }
+  .grid-wrap {
+    overflow-x: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    width: fit-content; max-width: 100%;
+  }
+  /* Column widths come from <colgroup> (resizable, remembered per browser); the table is as wide as its columns. */
+  table { border-collapse: collapse; table-layout: fixed; }
   th, td { border-bottom: 1px solid var(--border); border-right: 1px solid var(--border); vertical-align: top; text-align: left; }
   th:last-child, td:last-child { border-right: 0; }
-  th { background: #fafbfc; font-weight: 600; padding: 8px; font-size: 12px; text-transform: uppercase; color: var(--muted); }
+  th {
+    background: #fafbfc; font-weight: 600; padding: 8px; font-size: 12px; text-transform: uppercase; color: var(--muted);
+    position: relative; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; user-select: none;
+  }
+  th .col-resize { position: absolute; top: 0; right: 0; width: 7px; height: 100%; cursor: col-resize; }
+  th .col-resize:hover, th .col-resize.on { background: var(--accent); opacity: .5; }
+  body.resizing { cursor: col-resize; user-select: none; }
   tbody tr:hover { background: var(--row-hover); }
-  td { padding: 0; }
-  td.id { padding: 8px; color: var(--muted); width: 48px; text-align: right; }
-  td.act { width: 44px; text-align: center; padding: 4px; }
+  td { padding: 0; overflow: hidden; }
+  td.id { padding: 8px; color: var(--muted); text-align: right; white-space: nowrap; }
+  td.act { text-align: center; padding: 4px; }
+  .drag-handle { float: left; cursor: grab; color: #9aa5b1; padding: 0 4px 0 0; user-select: none; }
+  .drag-handle:hover { color: var(--accent); }
+  tr.dragging { opacity: .4; }
+  tr.drop-before td { box-shadow: inset 0 2px 0 var(--accent); }
+  tr.drop-after td { box-shadow: inset 0 -2px 0 var(--accent); }
+  /* Rows with edits that have not reached the server yet. */
+  tr.unsynced td.id { background: #fffbeb; color: #b45309; font-weight: 600; }
+  tr.unsynced td.id::after { content: " ●"; }
   td input.cell {
     width: 100%;
     border: 0;
@@ -85,6 +112,8 @@
   td select.cell { width: 100%; border: 0; background: transparent; font: inherit; color: var(--muted); padding: 8px 4px; outline: none; cursor: pointer; }
   td .approval { padding: 8px; color: var(--muted); }
   td .approved, td select.cell.approved { color: #15803d; font-weight: 600; }
+  td input.cell.status, td select.cell.priority, td .priority { font-weight: 600; }
+  td .priority { padding: 8px; }
   td .rich { padding: 8px; min-height: 36px; outline: none; white-space: pre-wrap; overflow-wrap: anywhere; }
   td .rich:empty::before { content: attr(data-placeholder); color: #9aa5b1; }
   td.active-cell { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -181,7 +210,7 @@
   <button id="btnLabels">Manage Labels</button>
   <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" hidden>
   <div class="spacer"></div>
-  <span id="syncState" class="sync-state"></span>
+  <button id="syncState" class="sync-state" type="button"></button>
   <span id="lockState" class="lock-state"></span>
   <button id="btnChangePin" hidden>Change PIN</button>
   <button id="btnLock"></button>
@@ -192,7 +221,10 @@
     <input type="search" id="search" placeholder="Search text…">
     <select id="fLabel" title="Filter by label"></select>
     <select id="fAssignee" title="Filter by assignee"></select>
+    <select id="fStatus" title="Filter by status"></select>
+    <select id="fPriority" title="Filter by priority"></select>
     <select id="fApproval" title="Filter by approval"></select>
+    <select id="sortBy" title="Sort order"></select>
     <div id="activeFilters" class="active"></div>
     <button id="btnClear" hidden>Clear filters</button>
     <span id="count" class="count"></span>
@@ -213,18 +245,9 @@
     <span id="fmtHint" class="fmt-hint"></span>
   </div>
   <div class="grid-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>#</th>
-          <th style="width:20%">Issue Name</th>
-          <th style="width:28%">Description</th>
-          <th style="width:22%">Labels</th>
-          <th style="width:12%">Assignee</th>
-          <th style="width:16%">Approved By</th>
-          <th></th>
-        </tr>
-      </thead>
+    <table id="grid">
+      <colgroup id="cols"></colgroup>
+      <thead><tr id="headRow"></tr></thead>
       <tbody id="rows"></tbody>
     </table>
     <div id="empty" class="empty" hidden></div>
@@ -235,12 +258,17 @@
     Click a label to filter by it. Label filters of the same type match any of them; different types must all match.<br>
     Format: click a cell (or select part of its text) and use <b>B</b>, <i>I</i>, <b>A</b> (text color) or <b>Fill</b> (cell color);
     Ctrl+B / Ctrl+I also work while typing.<br>
-    Changes are saved automatically. Editing requires the PIN.
+    Order: rows are sorted by <b>Priority</b> by default (change it with the sort menu). Drag <b>⠿</b> to reorder rows
+    (in Priority sort, within the same priority). Drag a column header's right edge to resize it; double-click it to reset.<br>
+    Changes are saved automatically. Editing requires the PIN. Rows marked <b style="color:#b45309">●</b> are not saved yet:
+    wait for <b style="color:#15803d">✓ All changes saved</b> before closing the page
+    (click that badge to save right away and double-check with the server).
   </div>
 </main>
 
 <datalist id="labelList"></datalist>
 <datalist id="assigneeList"></datalist>
+<datalist id="statusList"></datalist>
 
 <div id="modalBack" class="modal-back" hidden>
   <div class="modal">
@@ -274,13 +302,34 @@
   const KEY_ISSUES = 'sts.issues';
   const KEY_PIN = 'sts.pinHash';
   const KEY_LABELS = 'sts.labels';
+  const KEY_COL_WIDTHS = 'sts.colWidths';
+  const KEY_SORT = 'sts.sort';
   const HEX_RE = /^#[0-9a-f]{6}$/i;
-  const BG_FIELDS = ['name', 'description', 'labels', 'assignee', 'approvedBy'];
+  const BG_FIELDS = ['name', 'description', 'status', 'priority', 'labels', 'assignee', 'approvedBy'];
   // People who can approve an issue (shown in the "Approved By" column).
   const APPROVERS = ['Capt Mohamed', 'Capt Abdullah'];
+  // Suggested statuses (any other text can be typed) and their colors.
+  const STATUSES = ['Open', 'In Progress', 'Blocked', 'Done'];
+  const STATUS_COLORS = { open: '#2563eb', 'in progress': '#d97706', blocked: '#dc2626', done: '#15803d' };
+  // Priorities from highest to lowest; the default sort follows this order.
+  const PRIORITIES = ['Critical', 'High', 'Medium', 'Low'];
+  const PRIORITY_COLORS = { critical: '#b91c1c', high: '#ea580c', medium: '#ca8a04', low: '#64748b' };
+  const COLUMNS = [
+    { key: 'id', label: '#', width: 72 },
+    { key: 'name', label: 'Issue Name', width: 200 },
+    { key: 'description', label: 'Description', width: 280 },
+    { key: 'status', label: 'Status', width: 120 },
+    { key: 'priority', label: 'Priority', width: 110 },
+    { key: 'labels', label: 'Labels', width: 200 },
+    { key: 'assignee', label: 'Assignee', width: 130 },
+    { key: 'approvedBy', label: 'Approved By', width: 180 },
+    { key: 'act', label: '', width: 44, fixed: true },
+  ];
+  const MIN_COL_WIDTH = 40;
   const PIN_RE = /^\d{4,8}$/;
   const DEFAULT_PIN = '1234';   // used until someone changes it
   const AUTO_LOCK_MS = 10 * 60 * 1000;
+  const PAGE_TITLE = document.title;
 
   // ---------- state ----------
   let issues = load();
@@ -293,6 +342,11 @@
   let filterLabels = [];
   let filterAssignee = '';
   let filterApproval = '';
+  let filterStatus = '';
+  let filterPriority = '';
+  let sortBy = readPref(KEY_SORT, 'priority');
+  let colWidths = readPref(KEY_COL_WIDTHS, {});
+  const EMPTY = '\u0000empty';
   const NOT_APPROVED = '\u0000none';
   const ANY_APPROVED = '\u0000any';
   const UNASSIGNED = '\u0000unassigned';
@@ -300,6 +354,16 @@
   // Set when the page is served by server.py: { token, hasPin, version, synced, syncedLabels }.
   let server = null;
 
+  // Per-browser view preferences (sort, column widths); storage may be unavailable.
+  function readPref(key, fallback) {
+    try {
+      const v = JSON.parse(localStorage.getItem(key));
+      return v ?? fallback;
+    } catch { return fallback; }
+  }
+  function writePref(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+  }
   function readJson(key) {
     try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch { return []; }
   }
@@ -323,8 +387,12 @@
     return issues.filter(it => it.labels.some(l => sameLabel(l, label))).length;
   }
   function save() {
-    if (server) scheduleSync();
-    else localStorage.setItem(KEY_ISSUES, JSON.stringify(issues));
+    if (server) {
+      scheduleSync();
+      // An edit can leave the data as it was (same label again, typing then undoing): show what is really pending.
+      if (unlocked && !syncing && !server.offline) savedState();
+      updateSyncUi();
+    } else localStorage.setItem(KEY_ISSUES, JSON.stringify(issues));
     refreshLists();
   }
   function normalize(it) {
@@ -333,11 +401,29 @@
       name: toRuns(it.name),
       description: toRuns(it.description),
       bg: cleanBg(it.bg),
+      status: String(it.status ?? ''),
+      priority: cleanPriority(it.priority),
       labels: addLabels([], (Array.isArray(it.labels) ? it.labels : splitLabels(it.labels)).map(cleanLabel)),
       assignee: String(it.assignee ?? ''),
       approvedBy: cleanApprover(it.approvedBy),
+      // Position for manual (drag & drop) ordering; older data falls back to the id.
+      order: typeof it.order === 'number' && Number.isFinite(it.order) ? it.order : Number(it.id) || 0,
     };
   }
+  function cleanPriority(v) {
+    const s = String(v ?? '').trim();
+    return PRIORITIES.find(p => p.toLowerCase() === s.toLowerCase()) || s;
+  }
+  // Rank used for sorting: known values in list order, then unknown values, then empty.
+  function rank(list, v) {
+    const s = v.trim().toLowerCase();
+    if (!s) return list.length + 1;
+    const i = list.findIndex(x => x.toLowerCase() === s);
+    return i < 0 ? list.length : i;
+  }
+  const priorityRank = it => rank(PRIORITIES, it.priority);
+  const statusColor = s => STATUS_COLORS[s.trim().toLowerCase()] || labelColor(s.trim());
+  const priorityColor = p => PRIORITY_COLORS[p.trim().toLowerCase()] || 'var(--muted)';
   // Rich text is stored as runs: [{ t: 'text', b: 1, i: 1, c: '#rrggbb' }].
   function toRuns(v) {
     const raw = Array.isArray(v) ? v : (v == null || v === '' ? [] : [{ t: String(v) }]);
@@ -406,6 +492,53 @@
   }
   function nextId() {
     return issues.reduce((m, it) => Math.max(m, it.id), 0) + 1;
+  }
+  function nextOrder() {
+    return issues.reduce((m, it) => Math.max(m, it.order), 0) + 1;
+  }
+
+  // ---------- sorting & manual order ----------
+  const byOrder = (a, b) => a.order - b.order || a.id - b.id;
+  const byText = (f, a, b) => (!a[f].trim()) - (!b[f].trim()) || a[f].trim().localeCompare(b[f].trim());
+  const SORTS = {
+    priority: { label: 'Sort: Priority', drag: true, cmp: (a, b) => priorityRank(a) - priorityRank(b) || byOrder(a, b) },
+    manual: { label: 'Sort: Manual order', drag: true, cmp: byOrder },
+    status: {
+      label: 'Sort: Status',
+      cmp: (a, b) => rank(STATUSES, a.status) - rank(STATUSES, b.status) || byText('status', a, b) || SORTS.priority.cmp(a, b),
+    },
+    assignee: { label: 'Sort: Assignee', cmp: (a, b) => byText('assignee', a, b) || SORTS.priority.cmp(a, b) },
+    newest: { label: 'Sort: Newest first', cmp: (a, b) => b.id - a.id },
+    oldest: { label: 'Sort: Oldest first', cmp: (a, b) => a.id - b.id },
+  };
+  if (!SORTS[sortBy]) sortBy = 'priority';
+  const sortedIssues = () => [...issues].sort(SORTS[sortBy].cmp);
+  const canDrag = () => unlocked && !!SORTS[sortBy].drag;
+  // In Priority sort rows can only move among rows of the same priority.
+  const sameGroup = (a, b) => sortBy !== 'priority' || priorityRank(a) === priorityRank(b);
+
+  function renumberOrder() {
+    [...issues].sort(byOrder).forEach((it, i) => { it.order = i + 1; });
+  }
+
+  // Moves an issue just before / after another visible row by giving it an order between its new neighbours.
+  function moveIssue(dragId, targetId, after) {
+    const dragged = issues.find(x => x.id === dragId);
+    const list = sortedIssues().filter(matches).filter(x => x !== dragged);
+    const i = list.findIndex(x => x.id === targetId) + (after ? 1 : 0);
+    const near = x => (x && sameGroup(x, dragged) ? x : null);
+    const prev = near(list[i - 1]), next = near(list[i]);
+    const between = () => (prev && next ? (prev.order + next.order) / 2
+      : prev ? prev.order + 1 : next ? next.order - 1 : dragged.order);
+    let order = between();
+    if ((prev && !(order > prev.order)) || (next && !(order < next.order))) {
+      renumberOrder();   // neighbours share an order (or ran out of room): spread everything out first
+      order = between();
+    }
+    dragged.order = order;
+    save();
+    touch();
+    render();
   }
 
   // ---------- PIN ----------
@@ -635,6 +768,11 @@
       const a = it.assignee.trim().toLowerCase();
       if (filterAssignee === UNASSIGNED ? a : a !== filterAssignee.toLowerCase()) return false;
     }
+    for (const [want, have] of [[filterStatus, it.status], [filterPriority, it.priority]]) {
+      if (!want) continue;
+      const v = have.trim().toLowerCase();
+      if (want === EMPTY ? v : v !== want.toLowerCase()) return false;
+    }
     if (filterApproval) {
       const a = it.approvedBy;
       if (filterApproval === NOT_APPROVED ? a : filterApproval === ANY_APPROVED ? !a : a !== filterApproval) return false;
@@ -652,7 +790,7 @@
     }
     if (!filterText) return true;
     const q = filterText.toLowerCase();
-    return [text(it.name), text(it.description), it.assignee, it.approvedBy, ...it.labels, String(it.id)]
+    return [text(it.name), text(it.description), it.status, it.priority, it.assignee, it.approvedBy, ...it.labels, String(it.id)]
       .some(v => v.toLowerCase().includes(q));
   }
 
@@ -702,13 +840,29 @@
     for (const a of approvers) fp.append(new Option(`Approved by ${a}`, a));
     fp.value = filterApproval;
 
+    fillSelect($('fStatus'), filterStatus, ['All statuses', 'No status'], uniq([...STATUSES, ...issues.map(i => i.status)]));
+    fillSelect($('fPriority'), filterPriority, ['All priorities', 'No priority'], uniq([...PRIORITIES, ...issues.map(i => i.priority)]));
+
+    const so = $('sortBy');
+    so.innerHTML = '';
+    for (const [k, v] of Object.entries(SORTS)) so.append(new Option(v.label, k));
+    so.value = sortBy;
+
     const box = $('activeFilters');
     box.innerHTML = '';
     for (const l of filterLabels) {
       box.append(makeChip(l, { onRemove: () => { filterLabels = filterLabels.filter(x => x !== l); render(); } }));
     }
-    $('btnClear').hidden = !(filterLabels.length || filterAssignee || filterApproval || filterText);
+    $('btnClear').hidden = !(filterLabels.length || filterAssignee || filterApproval || filterStatus || filterPriority || filterText);
     $('count').textContent = `${visibleCount} of ${issues.length} issue(s)`;
+  }
+
+  // Options: [all, empty] followed by one per value.
+  function fillSelect(sel, value, [all, none], values) {
+    sel.innerHTML = '';
+    sel.append(new Option(all, ''), new Option(none, EMPTY));
+    for (const v of values) sel.append(new Option(v, v));
+    sel.value = value;
   }
 
   function clearFilters() {
@@ -716,6 +870,8 @@
     filterLabels = [];
     filterAssignee = '';
     filterApproval = '';
+    filterStatus = '';
+    filterPriority = '';
     $('search').value = '';
   }
 
@@ -729,13 +885,70 @@
 
     const tbody = $('rows');
     tbody.innerHTML = '';
-    const visible = issues.filter(matches);
+    const visible = sortedIssues().filter(matches);
     for (const it of visible) tbody.append(renderRow(it));
 
     const empty = $('empty');
     empty.hidden = visible.length > 0;
     empty.textContent = issues.length ? 'No issues match the filters.' : 'No issues yet. Click “+ Add Issue” to start.';
     refreshLists();
+    updateSyncUi();
+  }
+
+  // ---------- columns (resizable, widths remembered in this browser) ----------
+  const colWidth = c => (c.fixed ? c.width : Math.max(MIN_COL_WIDTH, Number(colWidths[c.key]) || c.width));
+
+  function renderHeader() {
+    const cols = $('cols'), head = $('headRow');
+    cols.innerHTML = '';
+    head.innerHTML = '';
+    for (const c of COLUMNS) {
+      const col = document.createElement('col');
+      col.style.width = colWidth(c) + 'px';
+      cols.append(col);
+      const th = document.createElement('th');
+      th.textContent = c.label;
+      th.title = c.label;
+      if (!c.fixed) {
+        const grip = document.createElement('span');
+        grip.className = 'col-resize';
+        grip.title = 'Drag to resize, double-click to reset';
+        grip.onpointerdown = e => startResize(e, c, col, grip);
+        grip.ondblclick = () => {
+          delete colWidths[c.key];
+          writePref(KEY_COL_WIDTHS, colWidths);
+          renderHeader();
+        };
+        th.append(grip);
+      }
+      head.append(th);
+    }
+    updateTableWidth();
+  }
+
+  function updateTableWidth() {
+    $('grid').style.width = COLUMNS.reduce((sum, c) => sum + colWidth(c), 0) + 'px';
+  }
+
+  function startResize(e, c, col, grip) {
+    e.preventDefault();
+    const startX = e.clientX, startW = colWidth(c);
+    document.body.classList.add('resizing');
+    grip.classList.add('on');
+    const move = ev => {
+      colWidths[c.key] = Math.max(MIN_COL_WIDTH, Math.round(startW + ev.clientX - startX));
+      col.style.width = colWidths[c.key] + 'px';
+      updateTableWidth();
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      document.body.classList.remove('resizing');
+      grip.classList.remove('on');
+      writePref(KEY_COL_WIDTHS, colWidths);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
   }
 
   function renderRow(it) {
@@ -744,7 +957,29 @@
 
     const tdId = document.createElement('td');
     tdId.className = 'id';
-    tdId.textContent = it.id;
+    if (canDrag()) {
+      // Only the handle starts a drag, so text in the cells can still be selected.
+      const handle = document.createElement('span');
+      handle.className = 'drag-handle';
+      handle.textContent = '⠿';
+      handle.title = sortBy === 'priority' ? 'Drag to reorder (within the same priority)' : 'Drag to reorder';
+      handle.onmousedown = () => { tr.draggable = true; };
+      handle.onmouseup = () => { tr.draggable = false; };
+      tr.ondragstart = e => {
+        dragId = it.id;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(it.id));
+        tr.classList.add('dragging');
+      };
+      tr.ondragend = () => {
+        tr.draggable = false;
+        tr.classList.remove('dragging');
+        dragId = null;
+        clearDropMarks();
+      };
+      tdId.append(handle);
+    }
+    tdId.append(String(it.id));
 
     // Issue name is a single line of text that wraps visually; Enter does not add a newline.
     const name = richCell(it, 'name', 'Issue name', true);
@@ -757,6 +992,21 @@
     assignee.setAttribute('list', 'assigneeList');
     assignee.disabled = !unlocked;
     assignee.oninput = () => { it.assignee = assignee.value; save(); touch(); };
+
+    // Status: free text like Assignee, with the usual statuses (and ones already used) as suggestions.
+    const status = document.createElement('input');
+    status.className = 'cell status';
+    status.value = it.status;
+    status.placeholder = unlocked ? 'Set status…' : '';
+    status.setAttribute('list', 'statusList');
+    status.disabled = !unlocked;
+    status.style.color = it.status.trim() ? statusColor(it.status) : '';
+    status.oninput = () => {
+      it.status = status.value;
+      status.style.color = it.status.trim() ? statusColor(it.status) : '';
+      save();
+      touch();
+    };
 
     const act = document.createElement('td');
     act.className = 'act';
@@ -771,9 +1021,67 @@
       act.append(del);
     }
 
-    tr.append(tdId, wrap(name, it, 'name'), wrap(desc, it, 'description'), renderLabels(it), wrap(assignee, it, 'assignee'),
+    tr.append(tdId, wrap(name, it, 'name'), wrap(desc, it, 'description'), wrap(status, it, 'status'),
+      wrap(priorityCell(it), it, 'priority'), renderLabels(it), wrap(assignee, it, 'assignee'),
       wrap(approvalCell(it), it, 'approvedBy'), act);
     return tr;
+  }
+
+  function priorityCell(it) {
+    if (!unlocked) {
+      const div = document.createElement('div');
+      div.className = 'priority';
+      div.textContent = it.priority;
+      div.style.color = priorityColor(it.priority);
+      return div;
+    }
+    const sel = document.createElement('select');
+    sel.className = 'cell priority';
+    sel.append(new Option('—', ''));
+    for (const p of uniq([...PRIORITIES, it.priority])) sel.append(new Option(p, p));
+    sel.value = it.priority;
+    sel.style.color = priorityColor(it.priority);
+    sel.onchange = () => {
+      it.priority = sel.value;
+      sel.style.color = priorityColor(it.priority);
+      save();
+      touch();
+      if (sortBy === 'priority') render();   // move the row to its new place
+    };
+    return sel;
+  }
+
+  // ---------- drag & drop rows ----------
+  let dragId = null;
+  let dropAt = null;   // { id, after } of the row the dragged one will land next to
+
+  function clearDropMarks() {
+    document.querySelectorAll('tr.drop-before, tr.drop-after').forEach(tr => tr.classList.remove('drop-before', 'drop-after'));
+  }
+
+  function onDragOver(e) {
+    if (dragId == null) return;
+    clearDropMarks();
+    dropAt = null;
+    const tr = e.target.closest('tr[data-id]');
+    if (!tr || Number(tr.dataset.id) === dragId) return;
+    const target = issues.find(x => x.id === Number(tr.dataset.id));
+    const dragged = issues.find(x => x.id === dragId);
+    if (!target || !dragged || !sameGroup(target, dragged)) return;   // not a valid drop spot
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const r = tr.getBoundingClientRect();
+    const after = e.clientY > r.top + r.height / 2;
+    tr.classList.add(after ? 'drop-after' : 'drop-before');
+    dropAt = { id: target.id, after };
+  }
+
+  function onDrop(e) {
+    e.preventDefault();
+    const id = dragId;
+    clearDropMarks();
+    if (id != null && dropAt) moveIssue(id, dropAt.id, dropAt.after);
+    dropAt = null;
   }
 
   function approvalCell(it) {
@@ -949,6 +1257,7 @@
     const people = uniq(issues.map(i => i.assignee)).sort((a, b) => a.localeCompare(b));
     fillList($('labelList'), labels);
     fillList($('assigneeList'), people);
+    fillList($('statusList'), uniq([...STATUSES, ...issues.map(i => i.status)]));
     renderFilters();
   }
   function fillList(dl, values) {
@@ -961,10 +1270,10 @@
   }
 
   // ---------- Excel ----------
-  const HEADERS = ['ID', 'Issue Name', 'Description', 'Labels', 'Assignee', 'Approved By'];
+  const HEADERS = ['ID', 'Issue Name', 'Description', 'Status', 'Priority', 'Labels', 'Assignee', 'Approved By'];
 
   // Column number (1-based) of each formattable field in the exported sheet.
-  const FIELD_COLUMNS = { name: 2, description: 3, labels: 4, assignee: 5, approvedBy: 6 };
+  const FIELD_COLUMNS = { name: 2, description: 3, status: 4, priority: 5, labels: 6, assignee: 7, approvedBy: 8 };
   const toArgb = hex => 'FF' + hex.slice(1).toUpperCase();
   const fromArgb = argb => (/^[0-9a-f]{8}$/i.test(argb ?? '') ? '#' + argb.slice(2).toLowerCase() : '');
 
@@ -981,10 +1290,12 @@
   async function exportExcel() {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Issues');
-    ws.columns = [{ width: 6 }, { width: 30 }, { width: 50 }, { width: 30 }, { width: 18 }, { width: 18 }];
+    ws.columns = [{ width: 6 }, { width: 30 }, { width: 50 }, { width: 14 }, { width: 10 }, { width: 30 }, { width: 18 }, { width: 18 }];
     ws.addRow(HEADERS).font = { bold: true };
-    for (const it of issues) {
-      const row = ws.addRow([it.id, runsToExcel(it.name), runsToExcel(it.description), it.labels.join(', '), it.assignee, it.approvedBy]);
+    // Rows are written in the current sort order; importing with "Replace all" keeps that order.
+    for (const it of sortedIssues()) {
+      const row = ws.addRow([it.id, runsToExcel(it.name), runsToExcel(it.description), it.status, it.priority,
+        it.labels.join(', '), it.assignee, it.approvedBy]);
       row.alignment = { vertical: 'top', wrapText: true };
       for (const [field, col] of Object.entries(FIELD_COLUMNS)) {
         const bg = it.bg[field];
@@ -1011,6 +1322,8 @@
     id: ['id', 'no', 'number'],
     name: ['issuename', 'issue', 'name', 'title'],
     description: ['description', 'desc', 'details'],
+    status: ['status', 'state'],
+    priority: ['priority', 'prio'],
     labels: ['labels', 'label', 'tags', 'tag'],
     assignee: ['assignee', 'assignedto', 'assigned', 'owner', 'pic'],
     approvedBy: ['approvedby', 'approver', 'approval', 'approved'],
@@ -1130,11 +1443,11 @@
       // Keep the file's IDs when they are valid and unique; otherwise renumber.
       const ids = rows.map(r => Number(r.id));
       const keep = ids.every(n => Number.isInteger(n) && n > 0) && new Set(ids).size === ids.length;
-      imported.forEach((it, i) => { it.id = keep ? ids[i] : i + 1; });
+      imported.forEach((it, i) => { it.id = keep ? ids[i] : i + 1; it.order = i + 1; });
       issues = imported;
     } else {
-      let id = nextId();
-      imported.forEach(it => { it.id = id++; });
+      let id = nextId(), order = nextOrder();
+      imported.forEach(it => { it.id = id++; it.order = order++; });
       issues = [...issues, ...imported];
     }
     save();
@@ -1347,9 +1660,28 @@
     return data;
   }
 
-  function setSyncState(msg, warn = false) {
-    $('syncState').textContent = msg;
-    $('syncState').classList.toggle('warn', warn);
+  // kind: 'ok' (saved), 'pending' (edits waiting), 'saving', 'warn' (problem) or '' (neutral).
+  function setSyncState(msg, kind = '') {
+    const el = $('syncState');
+    el.textContent = msg;
+    el.className = 'sync-state' + (kind ? ' ' + kind : '');
+    el.title = (kind === 'pending' || kind === 'saving' || kind === 'warn'
+      ? 'Some changes may not be on the server yet. Wait for “All changes saved” before closing this page.\n' : '')
+      + 'Click to save now and double-check with the server.';
+  }
+  const savedState = () => (pendingChanges() ? setSyncState('● Not saved yet', 'pending') : setSyncState('✓ All changes saved', 'ok'));
+
+  // Marks rows whose edits have not reached the server yet, and the tab title too.
+  function updateSyncUi() {
+    if (!server) return;
+    const changes = pendingChanges();
+    const dirty = new Set(changes ? changes.upsert.map(it => it.id) : []);
+    for (const tr of $('rows').children) {
+      const on = dirty.has(Number(tr.dataset.id));
+      tr.classList.toggle('unsynced', on);
+      tr.firstElementChild.title = on ? 'Not saved to the server yet' : '';
+    }
+    document.title = (changes ? '● ' : '') + PAGE_TITLE;
   }
 
   function applyServerState(data) {
@@ -1372,38 +1704,105 @@
 
   let syncTimer = null;
   let syncing = null;
+  let syncDeadline = 0;   // continuous typing still saves at least this often
+  const MAX_SYNC_WAIT = 2000;
   function scheduleSync(delay = 500) {
     clearTimeout(syncTimer);
-    syncTimer = setTimeout(sync, delay);
+    const now = Date.now();
+    if (!syncDeadline) syncDeadline = now + MAX_SYNC_WAIT;
+    syncTimer = setTimeout(sync, Math.max(0, Math.min(delay, syncDeadline - now)));
+  }
+
+  // Records that `sent` (a pendingChanges() result) is now on the server.
+  function markSynced(sent) {
+    for (const [id, json] of sent.upsertJson) server.synced.set(id, json);
+    for (const id of sent.delete) server.synced.delete(id);
+    if (sent.labelsJson) server.syncedLabels = sent.labelsJson;
+  }
+  function snapshot(changes) {
+    // Remember exactly what was sent; edits made meanwhile go out with the next save.
+    return {
+      ...changes,
+      upsertJson: changes.upsert.map(it => [it.id, JSON.stringify(it)]),
+      labelsJson: changes.labels && JSON.stringify(changes.labels),
+    };
   }
 
   async function sync() {
     clearTimeout(syncTimer);
+    syncDeadline = 0;
     if (syncing) { await syncing; return sync(); }
     const changes = pendingChanges();
-    if (!changes) return;
-    if (!unlocked) { setSyncState('Unsaved changes: unlock to save', true); return; }
-    // Remember exactly what was sent; edits made meanwhile go out with the next save.
-    const sent = changes.upsert.map(it => [it.id, JSON.stringify(it)]);
-    const sentLabels = changes.labels && JSON.stringify(changes.labels);
-    setSyncState('Saving…');
+    if (!changes) {
+      if (!server.offline) savedState();
+      return;
+    }
+    if (!unlocked) { setSyncState('Unsaved changes: unlock to save', 'warn'); return; }
+    const sent = snapshot(changes);
+    setSyncState('⟳ Saving…', 'saving');
     syncing = api('POST', '/api/sync', changes).then(() => {
-      for (const [id, json] of sent) server.synced.set(id, json);
-      for (const id of changes.delete) server.synced.delete(id);
-      if (sentLabels) server.syncedLabels = sentLabels;
-      setSyncState('All changes saved');
+      markSynced(sent);
+      savedState();
     }, e => {
       if (e.status === 401) {
         setUnlocked(false);
-        setSyncState('Edit session expired: unlock to save your changes', true);
+        setSyncState('Edit session expired: unlock to save your changes', 'warn');
       } else {
-        setSyncState(`Not saved (${e.message}), retrying…`, true);
+        setSyncState(`Not saved (${e.message}), retrying…`, 'warn');
         scheduleSync(3000);
       }
     });
     await syncing;
     syncing = null;
+    updateSyncUi();
     if (unlocked && pendingChanges()) scheduleSync();
+  }
+
+  // Badge click: save anything pending now, then re-read the server and compare it with this page.
+  async function verifySaved() {
+    if (!server) return;
+    if (!unlocked && pendingChanges()) { requireUnlock(verifySaved); return; }
+    await sync();
+    if (pendingChanges()) return;   // sync() already shows why it could not save
+    setSyncState('⟳ Checking…', 'saving');
+    try {
+      const data = await api('GET', '/api/state');
+      const remote = new Map(data.issues.map(it => [it.id, JSON.stringify(normalize(it))]));
+      const differ = issues.filter(it => remote.get(it.id) !== JSON.stringify(it)).map(it => '#' + it.id);
+      if (JSON.stringify(uniq(data.labels.map(cleanLabel))) !== JSON.stringify(labelRegistry)) differ.push('labels');
+      if (differ.length) {
+        // Usually someone else edited these rows meanwhile; never overwrite their work from here.
+        setSyncState(`Server differs: ${differ.slice(0, 5).join(', ')}${differ.length > 5 ? '…' : ''}`, 'warn');
+        $('syncState').title = 'The server has a different version (maybe someone else just changed it). '
+          + 'Reload the page to see what is on the server.';
+      } else {
+        const t = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        setSyncState(`✓ All changes saved · checked ${t}`, 'ok');
+      }
+    } catch {
+      setSyncState('Server not reachable', 'warn');
+    }
+  }
+
+  // Sends pending edits right away in a request that survives the page closing (tab closed, reload, phone switching apps).
+  function flushNow() {
+    clearTimeout(syncTimer);
+    syncDeadline = 0;
+    const changes = server && unlocked && server.token && pendingChanges();
+    if (!changes) return;
+    const body = JSON.stringify(changes);
+    const sent = snapshot(changes);
+    fetch('/api/sync', {
+      method: 'POST',
+      keepalive: body.length < 60000,   // browsers cap keepalive bodies at 64 KB
+      headers: { 'Content-Type': 'application/json', 'X-Token': server.token },
+      body,
+    }).then(res => {
+      if (!res.ok) return scheduleSync();
+      markSynced(sent);
+      if (!syncing) savedState();
+      updateSyncUi();
+    }, () => scheduleSync(3000));
   }
 
   // Picks up other people's changes. Waits while this user is typing or has unsaved edits.
@@ -1412,8 +1811,8 @@
       const data = await api('GET', `/api/state?since=${server.version}`);
       if (server.offline) {
         server.offline = false;
-        setSyncState(pendingChanges() ? 'Unsaved changes' : 'Connected to server');
-      }
+        savedState();
+      } else if (!syncing && !pendingChanges() && $('syncState').classList.contains('pending')) savedState();
       const busy = $('rows').contains(document.activeElement) || $('fmtBar').contains(document.activeElement)
         || !mBack.hidden || !$('labelsBack').hidden;
       if (!data.unchanged && !busy && !syncing && !pendingChanges()) {
@@ -1424,7 +1823,7 @@
       }
     } catch {
       server.offline = true;
-      setSyncState('Server not reachable', true);
+      setSyncState('Server not reachable', 'warn');
     }
     setTimeout(poll, 4000);
   }
@@ -1435,26 +1834,30 @@
       try {
         server = {};
         applyServerState(await api('GET', '/api/state'));
-        setSyncState('Connected to server');
+        setSyncState('✓ All changes saved', 'ok');
         setTimeout(poll, 4000);
       } catch {
         server = null;
       }
     }
     if (!server) setSyncState('Saved in this browser only (no server)');
+    renderHeader();
     render();
   }
 
   window.addEventListener('beforeunload', e => {
     if (server && pendingChanges()) {
-      sync();
+      flushNow();
       e.preventDefault();
       e.returnValue = '';
     }
   });
+  window.addEventListener('pagehide', flushNow);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushNow(); });
 
   // ---------- wiring ----------
   $('btnLabels').onclick = () => requireUnlock(openLabelManager);
+  $('syncState').onclick = verifySaved;
   $('rows').addEventListener('focusin', e => {
     const td = e.target.closest('td[data-field]');
     if (td && unlocked) setActiveCell(td);
@@ -1496,15 +1899,15 @@
       }
       server.synced.set(it.id, JSON.stringify(it));
     } else {
-      it = normalize({ id: nextId() });
+      it = normalize({ id: nextId(), order: nextOrder() });
     }
     issues.push(it);
     save();
     clearFilters();
     render();
-    const last = $('rows').lastElementChild;
-    last?.querySelector('.rich')?.focus();
-    last?.scrollIntoView({ block: 'nearest' });
+    const row = $('rows').querySelector(`tr[data-id="${it.id}"]`);
+    row?.querySelector('.rich')?.focus();
+    row?.scrollIntoView({ block: 'nearest' });
   });
   $('btnExport').onclick = exportExcel;
   $('btnImport').onclick = () => requireUnlock(() => $('fileInput').click());
@@ -1519,6 +1922,11 @@
   $('fLabel').onchange = e => { if (e.target.value) addLabelFilter(e.target.value); };
   $('fAssignee').onchange = e => { filterAssignee = e.target.value; render(); };
   $('fApproval').onchange = e => { filterApproval = e.target.value; render(); };
+  $('fStatus').onchange = e => { filterStatus = e.target.value; render(); };
+  $('fPriority').onchange = e => { filterPriority = e.target.value; render(); };
+  $('sortBy').onchange = e => { sortBy = e.target.value; writePref(KEY_SORT, sortBy); render(); };
+  $('rows').addEventListener('dragover', onDragOver);
+  $('rows').addEventListener('drop', onDrop);
   $('btnClear').onclick = () => { clearFilters(); render(); };
   mBack.onclick = e => { if (e.target === mBack) closeModal(); };
 

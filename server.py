@@ -120,8 +120,11 @@ class Store:
         with self.lock:
             d = self.data
             d["lastId"] = max([d["lastId"], *(it["id"] for it in d["issues"])]) + 1
-            issue = {"id": d["lastId"], "name": [], "description": [], "labels": [],
-                     "assignee": "", "approvedBy": "", "bg": {}}
+            # New issues go to the end of the manual (drag & drop) order.
+            orders = (it.get("order", it["id"]) for it in d["issues"])
+            order = max([0, *(o for o in orders if isinstance(o, (int, float)) and not isinstance(o, bool))]) + 1
+            issue = {"id": d["lastId"], "name": [], "description": [], "status": "", "priority": "",
+                     "labels": [], "assignee": "", "approvedBy": "", "bg": {}, "order": order}
             d["issues"].append(issue)
             self._commit()
             return issue
